@@ -1,0 +1,98 @@
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+
+TOKEN = "7853541575:AAEFo-9PKC7f9vSwoeIn1LR1L2TXYF2BFWI"
+DELIVERY_IDS = [979025584, 6274276105, 1191690688, 8170847197]
+
+message_tracker = {
+    "accepted": False,
+    "message_ids": {},
+    "full_phone": "",
+    "original_message": ""
+}
+
+MAX_MESSAGE_LENGTH = 500
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "مرحباً عزيز العميل 👋\n\n"
+        "الرجاء كتابة تفاصيل مشوارك:\n"
+        "📍 من ... إلى ... أو أي وصف\n"
+        "📞 رقم الجوال\n"
+        "💰 السعر المقترح\n\n"
+        "🚕 السائق سيتواصل معك خلال 3 دقائق على الواتساب، كن بانتظاره (السائق موثوق)"
+    )
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_message = update.message.text
+    sender_name = update.message.from_user.first_name
+
+    if len(user_message) > MAX_MESSAGE_LENGTH:
+        return
+
+    phone = ""
+    words = user_message.split()
+    clean_words = []
+    for word in words:
+        if word.startswith("05") and word.isdigit() and len(word) >= 9:
+            phone = word
+            clean_words.append("📞 رقم الجوال: مخفي ✅")
+        else:
+            clean_words.append(word)
+    
+    filtered_message = " ".join(clean_words)
+
+    message_tracker["accepted"] = False
+    message_tracker["message_ids"] = {}
+    message_tracker["full_phone"] = phone or "📞 لم يتم العثور على رقم"
+    message_tracker["original_message"] = filtered_message
+
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ قبول", callback_data="accept"),
+            InlineKeyboardButton("❌ رفض", callback_data="reject")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    for delegate_id in DELIVERY_IDS:
+        sent = await context.bot.send_message(
+            chat_id=delegate_id,
+            text=f"🚗 طلب جديد من {sender_name}\n\n📍 المشوار:\n{filtered_message}",
+            reply_markup=reply_markup
+        )
+        message_tracker["message_ids"][delegate_id] = sent.message_id
+
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+    await query.answer()
+
+    if message_tracker["accepted"]:
+        await query.message.edit_reply_markup(reply_markup=None)
+        return
+
+    if query.data == "accept":
+        phone_msg = message_tracker["full_phone"]
+        await query.message.reply_text(f"📞 رقم الجوال:\n{phone_msg}")
+        message_tracker["accepted"] = True
+
+        for delegate_id, msg_id in message_tracker["message_ids"].items():
+            if delegate_id != user_id:
+                try:
+                    await context.bot.delete_message(chat_id=delegate_id, message_id=msg_id)
+                except:
+                    pass
+
+        await query.message.edit_reply_markup(reply_markup=None)
+
+    elif query.data == "reject":
+        await query.message.edit_text("❌ تم تجاهل الطلب.")
+
+app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+app.add_handler(CallbackQueryHandler(button_callback))
+
+print("✅ Bot is now running...")
+app.run_polling()
