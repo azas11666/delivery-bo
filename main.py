@@ -2,7 +2,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
 TOKEN = "7853541575:AAEFo-9PKC7f9vSwoeIn1LR1L2TXYF2BFWI"
-DELIVERY_IDS = [979025584, 6274276105, 1191690688, 8170847197, 6934325493, 7829041114, 5089840611, 5867751923, 7059987819, 6907220336, 7453553320, ]
+DELIVERY_IDS = [979025584, 6274276105, 1191690688, 8170847197, 6934325493, 7829041114, 5089840611, 5867751923, 7059987819, 6907220336, 7453553320]
 
 message_tracker = {
     "accepted": False,
@@ -15,16 +15,17 @@ def mask_phone(phone):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-    "مرحباً فيك ببوت *مشاوير جدة* 👋\n\n"
-    "عزيزي العميل، الرجاء كتابة مشوارك بالتفاصيل التالية:\n"
-    "1️⃣ *اذكر مشوارك: من فين إلى وين*\n"
-    "2️⃣ *اذكر السعر المدفوع*\n"
-    "3️⃣ *اذكر رقم جوالك*\n\n"
-    "🟢 *اكتبها في رسالة واحدة فقط.*\n"
-    "بعدها سيتم إرسال طلبك لأكثر من 100 مندوب موثوق.\n"
-    "🚗 سيتواصل معك السائق عبر واتساب خلال 3 دقائق، كن بالانتظار.\n\n"
-    "🔒 *ملاحظة:* رقم جوالك لن يظهر إلا للسائق الذي يقبل المشوار، لذلك ضروري تكتبه."
-)
+        "مرحباً فيك ببوت *مشاوير جدة* 👋\n\n"
+        "عزيزي العميل، الرجاء كتابة مشوارك بالتفاصيل التالية:\n"
+        "1️⃣ *اذكر مشوارك: من فين إلى وين*\n"
+        "2️⃣ *اذكر السعر المدفوع*\n"
+        "3️⃣ *اذكر رقم جوالك*\n\n"
+        "🟢 *اكتبها في رسالة واحدة فقط.*\n"
+        "بعدها سيتم إرسال طلبك لأكثر من 100 مندوب موثوق.\n"
+        "🚗 سيتواصل معك السائق عبر واتساب خلال 3 دقائق، كن بالانتظار.\n\n"
+        "🔒 *ملاحظة:* رقم جوالك لن يظهر إلا للسائق الذي يقبل المشوار، لذلك ضروري تكتبه.",
+        parse_mode="Markdown"
+    )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
@@ -61,12 +62,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
-    await query.answer()
-
-if message_tracker["accepted"]:
-    await query.answer("تم قبول الطلب من قبل مندوب آخر.", show_alert=True)
-    return
-
 
     if message_tracker["accepted"]:
         await query.message.edit_reply_markup(reply_markup=None)
@@ -77,27 +72,19 @@ if message_tracker["accepted"]:
         await query.message.reply_text(f"📞 رقم الجوال:\n{phone_msg}")
         message_tracker["accepted"] = True
 
-for delegate_id, msg_id in message_tracker["message_ids"].items():
-    if delegate_id != user_id:
-        try:
-            await context.bot.delete_message(chat_id=delegate_id, message_id=msg_id)
-        except:
-            pass
+        for delegate_id, msg_id in message_tracker["message_ids"].items():
+            if delegate_id != user_id:
+                try:
+                    await context.bot.delete_message(chat_id=delegate_id, message_id=msg_id)
+                except:
+                    pass
 
-        
         await query.message.edit_reply_markup(reply_markup=None)
 
 app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 app.add_handler(CallbackQueryHandler(button_callback))
-
-
-accepted_requests = set()
-
-message_tracker = {
-    "accepted": False
-}
 
 print("Bot is running...")
 app.run_polling()
