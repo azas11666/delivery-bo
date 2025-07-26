@@ -68,3 +68,4 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     print("✅ Bot started and waiting for messages...")
     app.run_polling()
+
