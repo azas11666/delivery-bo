@@ -64,7 +64,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     request = {
         "id": request_id,
         "user_id": user_id,
-        "message": message,
+        "message": message.replace(phone_number, masked_number),
         "phone_number": phone_number,
         "masked_number": masked_number,
         "accepted_by": None
@@ -82,7 +82,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(
                 chat_id=delegate_id,
-                text=f"🚕 طلب جديد!\n\n{message}\n\n📞 رقم الجوال: {masked_number}",
+                text=f"🚕 طلب جديد!\n\n{request['message']}\n\n📞 رقم الجوال: {masked_number}",
                 reply_markup=keyboard
             )
         except Exception as e:
