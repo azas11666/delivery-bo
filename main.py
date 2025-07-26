@@ -59,13 +59,77 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     masked_number = mask_phone_number(phone_number)
-    await update.message.reply_text(f"✅ تم استلام طلبك، سيتم معالجته الآن. رقمك: {masked_number}")
+    request_id = str(len(active_requests) + 1)
+
+    request = {
+        "id": request_id,
+        "user_id": user_id,
+        "message": message,
+        "phone_number": phone_number,
+        "accepted_by": None
+    }
+
+    active_requests.append(request)
+    with open("requests.json", "w", encoding="utf-8") as f:
+        json.dump(active_requests, f, ensure_ascii=False, indent=2)
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚗 قبول المشوار", callback_data=f"accept_{request_id}")]
+    ])
+
+    for delegate_id in DELEGATE_IDS:
+        try:
+            await context.bot.send_message(
+                chat_id=delegate_id,
+                text=f"🚕 طلب جديد!\n\n{message}\n\nرقم الجوال: {masked_number}",
+                reply_markup=keyboard
+            )
+        except:
+            continue
+
+    await update.message.reply_text("✅ تم إرسال طلبك إلى المناديب، يرجى الانتظار...")
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    if data.startswith("accept_"):
+        request_id = data.split("_")[1]
+        delegate_id = query.from_user.id
+
+        for req in active_requests:
+            if req["id"] == request_id:
+                if req["accepted_by"] is None:
+                    req["accepted_by"] = delegate_id
+                    with open("requests.json", "w", encoding="utf-8") as f:
+                        json.dump(active_requests, f, ensure_ascii=False, indent=2)
+
+                    # إرسال رقم الجوال الحقيقي للمندوب
+                    await context.bot.send_message(
+                        chat_id=delegate_id,
+                        text=f"📞 رقم جوال العميل: {req['phone_number']}"
+                    )
+
+                    # إرسال إشعار للعميل
+                    await context.bot.send_message(
+                        chat_id=req["user_id"],
+                        text="✅ تم قبول طلبك من السائق، سيتواصل معك على الواتساب، كن بانتظاره."
+                    )
+
+                    # حذف الأزرار لبقية المناديب (تعديل الرسائل)
+                    await query.edit_message_reply_markup(reply_markup=None)
+
+                    break
+                else:
+                    await query.edit_message_text("❌ تم قبول هذا الطلب من مندوب آخر.")
+                    break
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+    app.add_handler(CallbackQueryHandler(button_handler))
     print("✅ Bot started and waiting for messages...")
     app.run_polling()
-
