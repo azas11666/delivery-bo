@@ -2,7 +2,14 @@ import os
 import json
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters,
+    ContextTypes,
+)
 
 TOKEN = "8407369465:AAFJ8MCRIkWoO2HiETILry7XeuHf81T1DBw"
 
@@ -12,8 +19,10 @@ DELEGATE_IDS = [
     7059987819, 6907220336, 7453553320, 7317135212
 ]
 
-FORBIDDEN_KEYWORDS = ["إجازة", "تقرير", "زواج", "مكيفات"]
-ALLOWED_WORDS = ["واتساب"]
+ADMIN_ID = 7799549664
+BLOCKED_KEYWORDS = [
+    "إجازة", "تقرير", "زواج", "مكيفات", "مكيف", "مرضية", "مرافق", "طبي", "واتس", "رقمي", "خاص"
+]
 
 active_requests = []
 if os.path.exists("requests.json"):
@@ -23,22 +32,28 @@ if os.path.exists("requests.json"):
 def mask_phone_number(phone):
     return phone[:-5] + "*****"
 
-def contains_forbidden_keywords(text):
-    for word in FORBIDDEN_KEYWORDS:
-        if word in text and all(allowed not in text for allowed in ALLOWED_WORDS):
+def is_forwarded(message):
+    return message.forward_date is not None
+
+def is_copy_paste(text):
+    return '\u202c' in text or '\u202a' in text or '\u200f' in text
+
+def contains_blocked_keywords(text):
+    for word in BLOCKED_KEYWORDS:
+        if word in text:
             return True
     return False
 
 def contains_phone_number(text):
-    for word in text.split():
-        if word.isdigit() and len(word) >= 9:
-            return True
-    return False
+    return any(word.isdigit() and len(word) >= 9 for word in text.split())
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id in DELEGATE_IDS:
-        await update.message.reply_text("✅ تم تسجيلك كمندوب بنجاح.")
+        await update.message.reply_text(
+            "✅ تم تسجيلك كمندوب بنجاح.\n\n"
+            "في حال لم تصلك الطلبات أو واجهت مشكلة، تواصل معنا على: 0506260139"
+        )
     else:
         await update.message.reply_text(
             "مرحباً فيك ببوت *مشاوير جدة* 👋\n\n"
@@ -50,7 +65,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "بعدها سيتم إرسال طلبك لأكثر من 100 مندوب موثوق.\n"
             "🚗 سيتواصل معك السائق عبر واتساب خلال 3 دقائق، كن بالانتظار.\n\n"
             "🔒 *ملاحظة:* رقم جوالك لن يظهر إلا للسائق الذي يقبل المشوار، لذلك ضروري تكتبه.\n"
-            "❌ لا توجد مشاوير شهرية.",
+            "❌ *لا توجد مشاوير شهرية*",
             parse_mode="Markdown"
         )
 
@@ -61,36 +76,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in DELEGATE_IDS:
         return
 
-    text = message.text
-
-    if message.is_automatic_forward or message.forward_date:
+    if is_forwarded(message):
+        await message.reply_text("❌ الرسائل المعاد توجيهها غير مسموحة.")
         return
 
-    if message.entities:
-        for entity in message.entities:
-            if entity.type in ["url", "phone_number"]:
-                return
-
-    if message.text and message.text != message.text.strip():
-        await message.reply_text("⚠️ لا يوجد لصق، اكتب مشوارك.")
+    if is_copy_paste(message.text):
+        await message.reply_text("❌ لا يوجد لصق، اكتب مشوارك.")
         return
 
-    if contains_forbidden_keywords(text):
+    if contains_blocked_keywords(message.text):
+        await message.reply_text("❌ هذه الرسالة تحتوي على كلمات غير مسموحة.")
         return
 
-    if len(text) > 400:
-        await message.reply_text("⚠️ رسالتك طويلة جدًا، الرجاء تقصيرها.")
+    if not contains_phone_number(message.text):
+        await message.reply_text("❌ يرجى تضمين رقم الجوال في رسالتك.")
         return
 
     phone_number = None
-    for word in text.split():
+    for word in message.text.split():
         if word.isdigit() and len(word) >= 9:
             phone_number = word
             break
-
-    if not phone_number:
-        await message.reply_text("❌ يرجى تضمين رقم الجوال في رسالتك.")
-        return
 
     masked_number = mask_phone_number(phone_number)
     request_id = str(len(active_requests))
@@ -98,7 +104,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     request = {
         "id": request_id,
         "user_id": user_id,
-        "message": text.replace(phone_number, masked_number),
+        "message": message.text.replace(phone_number, masked_number),
         "phone_number": phone_number,
         "masked_number": masked_number,
         "accepted_by": None
@@ -127,8 +133,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    data = query.data
 
+    data = query.data
     if not data.startswith("accept_"):
         return
 
@@ -156,10 +162,28 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_reply_markup(reply_markup=None)
             return
 
+async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        return
+
+    command = context.args[0] if context.args else ""
+    if command.startswith("add"):
+        new_id = int(command.split(":")[1])
+        if new_id not in DELEGATE_IDS:
+            DELEGATE_IDS.append(new_id)
+            await update.message.reply_text(f"✅ تمت إضافة المندوب: {new_id}")
+    elif command.startswith("del"):
+        del_id = int(command.split(":")[1])
+        if del_id in DELEGATE_IDS:
+            DELEGATE_IDS.remove(del_id)
+            await update.message.reply_text(f"🗑️ تم حذف المندوب: {del_id}")
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("admin", admin_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_handler))
     print("✅ Bot is running...")
