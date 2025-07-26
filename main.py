@@ -52,7 +52,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in DELEGATE_IDS:
         await update.message.reply_text(
             "✅ تم تسجيلك كمندوب بنجاح.\n\n"
-            "في حال لم تصلك الطلبات أو واجهت مشكلة، تواصل معنا على: 0506260139"
+            "إذا لم تصلك الطلبات أو واجهت أي مشكلة، تواصل معنا عبر واتساب: 0506260139"
         )
     else:
         await update.message.reply_text(
