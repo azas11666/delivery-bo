@@ -1,8 +1,8 @@
-import logging
 import os
 import json
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 TOKEN = "8407369465:AAFJ8MCRIkWoO2HiETILry7XeuHf81T1DBw"
 
@@ -23,9 +23,9 @@ def mask_phone_number(phone):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id in DELEGATE_IDS:
-        await context.bot.send_message(chat_id=user_id, text="✅ تم تسجيلك كمندوب بنجاح.")
+        await update.message.reply_text("✅ تم تسجيلك كمندوب بنجاح.")
     else:
-        await context.bot.send_message(chat_id=user_id, text=
+        await update.message.reply_text(
             "مرحباً فيك ببوت *مشاوير جدة* 👋\n\n"
             "عزيزي العميل، الرجاء كتابة مشوارك بالتفاصيل التالية:\n"
             "1️⃣ *اذكر مشوارك: من فين إلى وين*\n"
@@ -81,11 +81,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(
                 chat_id=delegate_id,
-                text=f"🚕 طلب جديد!\n\n{message}\n\nرقم الجوال: {masked_number}",
+                text=f"🚕 طلب جديد!\n\n{message}\n\n📞 رقم الجوال: {masked_number}",
                 reply_markup=keyboard
             )
-        except:
-            continue
+        except Exception as e:
+            print(f"❌ فشل في الإرسال إلى المندوب {delegate_id}: {e}")
 
     await update.message.reply_text("✅ تم إرسال طلبك إلى المناديب، يرجى الانتظار...")
 
@@ -105,21 +105,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     with open("requests.json", "w", encoding="utf-8") as f:
                         json.dump(active_requests, f, ensure_ascii=False, indent=2)
 
-                    # إرسال رقم الجوال الحقيقي للمندوب
                     await context.bot.send_message(
                         chat_id=delegate_id,
-                        text=f"📞 رقم جوال العميل: {req['phone_number']}"
+                        text=f"📞 رقم العميل: {req['phone_number']}"
                     )
 
-                    # إرسال إشعار للعميل
                     await context.bot.send_message(
                         chat_id=req["user_id"],
                         text="✅ تم قبول طلبك من السائق، سيتواصل معك على الواتساب، كن بانتظاره."
                     )
 
-                    # حذف الأزرار لبقية المناديب (تعديل الرسائل)
                     await query.edit_message_reply_markup(reply_markup=None)
-
                     break
                 else:
                     await query.edit_message_text("❌ تم قبول هذا الطلب من مندوب آخر.")
@@ -128,8 +124,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     app = ApplicationBuilder().token(TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_handler))
-    print("✅ Bot started and waiting for messages...")
+
+    print("✅ Bot is running and waiting for messages...")
     app.run_polling()
