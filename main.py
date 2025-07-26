@@ -12,6 +12,9 @@ DELEGATE_IDS = [
     7059987819, 6907220336, 7453553320, 7317135212
 ]
 
+FORBIDDEN_KEYWORDS = ["إجازة", "تقرير", "زواج", "مكيفات"]
+ALLOWED_WORDS = ["واتساب"]
+
 active_requests = []
 if os.path.exists("requests.json"):
     with open("requests.json", "r", encoding="utf-8") as f:
@@ -19,6 +22,18 @@ if os.path.exists("requests.json"):
 
 def mask_phone_number(phone):
     return phone[:-5] + "*****"
+
+def contains_forbidden_keywords(text):
+    for word in FORBIDDEN_KEYWORDS:
+        if word in text and all(allowed not in text for allowed in ALLOWED_WORDS):
+            return True
+    return False
+
+def contains_phone_number(text):
+    for word in text.split():
+        if word.isdigit() and len(word) >= 9:
+            return True
+    return False
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -34,28 +49,47 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🟢 *اكتبها في رسالة واحدة فقط.*\n"
             "بعدها سيتم إرسال طلبك لأكثر من 100 مندوب موثوق.\n"
             "🚗 سيتواصل معك السائق عبر واتساب خلال 3 دقائق، كن بالانتظار.\n\n"
-            "🔒 *ملاحظة:* رقم جوالك لن يظهر إلا للسائق الذي يقبل المشوار، لذلك ضروري تكتبه.",
+            "🔒 *ملاحظة:* رقم جوالك لن يظهر إلا للسائق الذي يقبل المشوار، لذلك ضروري تكتبه.\n"
+            "❌ لا توجد مشاوير شهرية.",
             parse_mode="Markdown"
         )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    message = update.message
+
     if user_id in DELEGATE_IDS:
         return
 
-    message = update.message.text
-    if len(message) > 400:
-        await update.message.reply_text("⚠️ رسالتك طويلة جدًا، الرجاء تقصيرها.")
+    text = message.text
+
+    if message.is_automatic_forward or message.forward_date:
+        return
+
+    if message.entities:
+        for entity in message.entities:
+            if entity.type in ["url", "phone_number"]:
+                return
+
+    if message.text and message.text != message.text.strip():
+        await message.reply_text("⚠️ لا يوجد لصق، اكتب مشوارك.")
+        return
+
+    if contains_forbidden_keywords(text):
+        return
+
+    if len(text) > 400:
+        await message.reply_text("⚠️ رسالتك طويلة جدًا، الرجاء تقصيرها.")
         return
 
     phone_number = None
-    for word in message.split():
+    for word in text.split():
         if word.isdigit() and len(word) >= 9:
             phone_number = word
             break
 
     if not phone_number:
-        await update.message.reply_text("❌ يرجى تضمين رقم الجوال في رسالتك.")
+        await message.reply_text("❌ يرجى تضمين رقم الجوال في رسالتك.")
         return
 
     masked_number = mask_phone_number(phone_number)
@@ -64,7 +98,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     request = {
         "id": request_id,
         "user_id": user_id,
-        "message": message.replace(phone_number, masked_number),
+        "message": text.replace(phone_number, masked_number),
         "phone_number": phone_number,
         "masked_number": masked_number,
         "accepted_by": None
@@ -88,13 +122,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logging.error(f"فشل الإرسال إلى المندوب {delegate_id}: {e}")
 
-    await update.message.reply_text("✅ تم إرسال طلبك إلى المناديب، يرجى الانتظار...")
+    await message.reply_text("✅ تم إرسال طلبك إلى المناديب، يرجى الانتظار...")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     data = query.data
+
     if not data.startswith("accept_"):
         return
 
