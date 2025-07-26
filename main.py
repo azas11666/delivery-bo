@@ -1,15 +1,18 @@
-import json
+import logging
 import os
-import re
-import asyncio
+import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
 
-TOKEN = "7853541575:AAEFo-9PKC7f9vSwoeIn1LR1L2TXYF2BFWI"
+TOKEN = "8407369465:AAFJ8MCRIkWoO2HiETILry7XeuHf81T1DBw"
 
-DELEGATE_IDS = [979025584, 6274276105]
+DELEGATE_IDS = [
+    979025584, 6274276105, 1191690688, 8170847197,
+    6934325493, 7829041114, 5089840611, 5867751923,
+    7059987819, 6907220336, 7453553320
+]
+
 active_requests = []
-
 if os.path.exists("requests.json"):
     with open("requests.json", "r", encoding="utf-8") as f:
         active_requests = json.load(f)
@@ -22,93 +25,42 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in DELEGATE_IDS:
         await context.bot.send_message(chat_id=user_id, text="✅ تم تسجيلك كمندوب بنجاح.")
     else:
-        await context.bot.send_message(chat_id=user_id, text="مرحبًا! أرسل تفاصيل المشوار لعرضها على المناديب.")
+        await context.bot.send_message(chat_id=user_id, text=
+            "مرحباً فيك ببوت *مشاوير جدة* 👋\n\n"
+            "عزيزي العميل، الرجاء كتابة مشوارك بالتفاصيل التالية:\n"
+            "1️⃣ *اذكر مشوارك: من فين إلى وين*\n"
+            "2️⃣ *اذكر السعر المدفوع*\n"
+            "3️⃣ *اذكر رقم جوالك*\n\n"
+            "🟢 *اكتبها في رسالة واحدة فقط.*\n"
+            "بعدها سيتم إرسال طلبك لأكثر من 100 مندوب موثوق.\n"
+            "🚗 سيتواصل معك السائق عبر واتساب خلال 3 دقائق، كن بالانتظار.\n\n"
+            "🔒 *ملاحظة:* رقم جوالك لن يظهر إلا للسائق الذي يقبل المشوار، لذلك ضروري تكتبه.",
+            parse_mode="Markdown"
+        )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id in DELEGATE_IDS:
         return
 
-    text = update.message.text
-    phone_match = re.search(r'(?:\+?966|0)?5\d{8}', text)
-    phone = phone_match.group(0) if phone_match else None
-    masked_phone = mask_phone_number(phone) if phone else "📞 لم يتم العثور على رقم"
-
-    filtered_message = text.replace(phone, "").strip() if phone else text
-
-    request = {
-        "original_message": filtered_message,
-        "full_phone": phone or "📞 لم يتم العثور على رقم",
-        "accepted_by": None,
-        "message_ids": {}
-    }
-
-    active_requests.append(request)
-
-    with open("requests.json", "w", encoding="utf-8") as f:
-        json.dump(active_requests, f, ensure_ascii=False, indent=2)
-
-    index = len(active_requests) - 1
-
-    for delegate_id in DELEGATE_IDS:
-        message = await context.bot.send_message(
-            chat_id=delegate_id,
-            text=f"🚕 طلب جديد!\n\n{filtered_message}\n\nرقم الجوال: {masked_phone}",
-            reply_markup=InlineKeyboardMarkup.from_button(
-                InlineKeyboardButton("🚗 قبول المشوار", callback_data=f"accept:{index}:{phone}")
-            )
-        )
-        request["message_ids"][str(delegate_id)] = message.message_id
-
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    delegate_id = query.from_user.id
-
-    try:
-        _, index_str, phone = query.data.split(":")
-        index = int(index_str)
-    except:
+    message = update.message.text
+    if len(message) > 400:
+        await update.message.reply_text("⚠️ رسالتك طويلة جدًا، الرجاء تقصيرها.")
         return
 
-    if index >= len(active_requests):
+    phone_number = None
+    for word in message.split():
+        if word.isdigit() and len(word) >= 9:
+            phone_number = word
+            break
+
+    if not phone_number:
+        await update.message.reply_text("❌ يرجى تضمين رقم الجوال في رسالتك.")
         return
 
-    request = active_requests[index]
-
-    if request["accepted_by"] is None:
-        request["accepted_by"] = delegate_id
-        await context.bot.send_message(chat_id=delegate_id, text=f"📞 رقم العميل: {request['full_phone']}")
-
-        for other_delegate_id, msg_id in request["message_ids"].items():
-            if int(other_delegate_id) != delegate_id:
-                try:
-                    await context.bot.delete_message(chat_id=int(other_delegate_id), message_id=msg_id)
-                except:
-                    pass
-
-        with open("requests.json", "w", encoding="utf-8") as f:
-            json.dump(active_requests, f, ensure_ascii=False, indent=2)
-
-async def remind_delegates(application):
-    while True:
-        for delegate_id in DELEGATE_IDS:
-            try:
-                await application.bot.send_message(
-                    chat_id=delegate_id,
-                    text="📣 عزيزي المندوب الرجاء الانتباه للبوت بشكل مستمر لحصولك على مشوار"
-                )
-            except:
-                continue
-        await asyncio.sleep(1800)
-
-app = ApplicationBuilder().token(TOKEN).build()
-
-app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-app.add_handler(CallbackQueryHandler(button_callback))
+    masked_number_
 
 
 
-print("✅ Bot is running...")
-app.run_polling()
+print("✅ Bot started and waiting for messages...")
+
