@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
@@ -7,7 +8,8 @@ TOKEN = "8407369465:AAFJ8MCRIkWoO2HiETILry7XeuHf81T1DBw"
 DELEGATE_IDS = [
     979025584, 6274276105, 1191690688, 8170847197,
     6934325493, 7829041114, 5089840611, 5867751923,
-    7059987819, 6907220336, 7453553320, 7317135212, 6545258494
+    7059987819, 6907220336, 7453553320, 7317135212,
+    6545258494, 7786225278
 ]
 
 FORBIDDEN_KEYWORDS = [
@@ -16,6 +18,8 @@ FORBIDDEN_KEYWORDS = [
 ]
 
 active_requests = []
+pending_users = set()
+lock = asyncio.Lock()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -55,6 +59,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in DELEGATE_IDS:
         return
 
+    if user_id in pending_users:
+        await update.message.reply_text("⚠️ طلبك السابق قيد المعالجة، الرجاء الانتظار قليلاً قبل إرسال طلب جديد.")
+        return
+
     message = update.message
 
     if message.forward_date:
@@ -81,6 +89,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not phone_number:
         await update.message.reply_text("❌ يرجى تضمين رقم الجوال في رسالتك.")
         return
+
+    pending_users.add(user_id)
 
     request_id = str(len(active_requests))
     request = {
@@ -110,6 +120,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logging.error(f"فشل الإرسال إلى المندوب {delegate_id}: {e}")
 
     await update.message.reply_text("✅ تم إرسال طلبك إلى المناديب، يرجى الانتظار...")
+    pending_users.discard(user_id)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -120,34 +131,36 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     request_id = data.split("_")[1]
-    for request in active_requests:
-        if request["id"] == request_id:
-            if request["accepted_by"] is not None:
-                await query.edit_message_text("❌ تم قبول هذا الطلب من مندوب آخر.")
+
+    async with lock:
+        for request in active_requests:
+            if request["id"] == request_id:
+                if request["accepted_by"] is not None:
+                    await query.edit_message_text("❌ تم قبول هذا الطلب من مندوب آخر.")
+                    return
+
+                request["accepted_by"] = query.from_user.id
+
+                await context.bot.send_message(
+                    chat_id=query.from_user.id,
+                    text=f"📞 رقم العميل: {request['phone_number']}"
+                )
+
+                await context.bot.send_message(
+                    chat_id=request["user_id"],
+                    text="✅ تم قبول طلبك من السائق، سيتواصل معك على الواتساب، كن بانتظاره."
+                )
+
+                for delegate_id, msg_id in request["message_ids"].items():
+                    try:
+                        await context.bot.edit_message_reply_markup(
+                            chat_id=delegate_id,
+                            message_id=msg_id,
+                            reply_markup=None
+                        )
+                    except Exception as e:
+                        logging.warning(f"فشل حذف الزر من مندوب {delegate_id}: {e}")
                 return
-
-            request["accepted_by"] = query.from_user.id
-
-            await context.bot.send_message(
-                chat_id=query.from_user.id,
-                text=f"📞 رقم العميل: {request['phone_number']}"
-            )
-
-            await context.bot.send_message(
-                chat_id=request["user_id"],
-                text="✅ تم قبول طلبك من السائق، سيتواصل معك على الواتساب، كن بانتظاره."
-            )
-
-            for delegate_id, msg_id in request["message_ids"].items():
-                try:
-                    await context.bot.edit_message_reply_markup(
-                        chat_id=delegate_id,
-                        message_id=msg_id,
-                        reply_markup=None
-                    )
-                except Exception as e:
-                    logging.warning(f"فشل حذف الزر من مندوب {delegate_id}: {e}")
-            return
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
