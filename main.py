@@ -127,3 +127,5 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if not data.startswith("accept_"):
+    return
+
