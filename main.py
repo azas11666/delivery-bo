@@ -17,9 +17,6 @@ FORBIDDEN_KEYWORDS = [
 
 active_requests = []
 
-def mask_phone_number(phone):
-    return phone[:-5] + "*****"
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id in DELEGATE_IDS:
@@ -85,14 +82,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ يرجى تضمين رقم الجوال في رسالتك.")
         return
 
-    masked_number = mask_phone_number(phone_number)
     request_id = str(len(active_requests))
     request = {
         "id": request_id,
         "user_id": user_id,
-        "message": message.text.replace(phone_number, masked_number),
+        "message": message.text.replace(phone_number, "******"),
         "phone_number": phone_number,
-        "masked_number": masked_number,
         "accepted_by": None,
         "message_ids": {}
     }
@@ -107,7 +102,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             sent = await context.bot.send_message(
                 chat_id=delegate_id,
-                text=f"🚕 طلب جديد!\n\n{request['message']}\n\n📞 رقم الجوال: {masked_number}",
+                text=f"🚕 طلب جديد!\n\n{request['message']}",
                 reply_markup=keyboard
             )
             request["message_ids"][delegate_id] = sent.message_id
