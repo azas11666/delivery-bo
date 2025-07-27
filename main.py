@@ -1,16 +1,13 @@
-import os
-import json
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
 TOKEN = "8407369465:AAFJ8MCRIkWoO2HiETILry7XeuHf81T1DBw"
 
 DELEGATE_IDS = [
     979025584, 6274276105, 1191690688, 8170847197,
     6934325493, 7829041114, 5089840611, 5867751923,
-    7059987819, 6907220336, 7453553320, 7317135212, 6545258494, 7786225278
-
+    7059987819, 6907220336, 7453553320, 7317135212, 6545258494
 ]
 
 ADMIN_ID = 7799549664
@@ -30,10 +27,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in DELEGATE_IDS:
         await context.bot.send_message(
             chat_id=user_id,
-            text=(
-                "✅ تم تسجيلك كمندوب بنجاح.\n"
-                "إذا لم تصلك طلبات أو واجهت مشاكل تواصل معنا على: 0506260139"
-            )
+            text="✅ تم تسجيلك كمندوب بنجاح.\nإذا لم تصلك طلبات أو واجهت مشاكل تواصل معنا على: 0506260139"
         )
     else:
         await update.message.reply_text(
@@ -160,7 +154,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         reply_markup=None
                     )
                 except Exception as e:
-                    logging.warning(f"فشل حذف الزر من رسالة مندوب {delegate_id}: {e}")
+                    logging.warning(f"فشل حذف الزر من مندوب {delegate_id}: {e}")
             return
 
 if __name__ == "__main__":
