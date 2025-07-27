@@ -10,8 +10,6 @@ DELEGATE_IDS = [
     7059987819, 6907220336, 7453553320, 7317135212, 6545258494
 ]
 
-ADMIN_ID = 7799549664
-
 FORBIDDEN_KEYWORDS = [
     "إجازة", "تقرير", "زواج", "مكيفات", "مكيف", "مرضية", "مراجة", "مشهد",
     "مرافق", "طبي", "متحررة", "سعر", "جميلة", "رقم", "056", "057", "058", "059"
@@ -57,7 +55,7 @@ def contains_forbidden(text):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id in DELEGATE_IDS or user_id == ADMIN_ID:
+    if user_id in DELEGATE_IDS:
         return
 
     message = update.message
@@ -75,7 +73,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if contains_forbidden(message.text):
-        await context.bot.send_message(chat_id=ADMIN_ID, text=f"🚨 رسالة مشتبه بها:\n{message.text}")
         return
 
     phone_number = None
