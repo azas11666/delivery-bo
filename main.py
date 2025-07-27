@@ -1,7 +1,7 @@
 import os
 import json
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 TOKEN = "8407369465:AAFJ8MCRIkWoO2HiETILry7XeuHf81T1DBw"
@@ -13,30 +13,26 @@ DELEGATE_IDS = [
 ]
 
 ADMIN_ID = 7799549664
+
+FORBIDDEN_KEYWORDS = [
+    "إجازة", "تقرير", "زواج", "مكيفات", "مكيف", "مرضية", "مراجة", "مشهد",
+    "مرافق", "طبي", "متحررة", "واتساب", "سعر", "جميلة", "رقم", "056", "057", "058", "059"
+]
+
 active_requests = []
-
-if os.path.exists("requests.json"):
-    with open("requests.json", "r", encoding="utf-8") as f:
-        active_requests = json.load(f)
-
-FORBIDDEN_KEYWORDS = ["إجازة", "تقرير", "زواج", "مكيفات", "مراجة", "مرضية"]
 
 def mask_phone_number(phone):
     return phone[:-5] + "*****"
 
-def contains_forbidden_keywords(text):
-    return any(word in text for word in FORBIDDEN_KEYWORDS)
-
-def is_forwarded_or_copied(message):
-    return message.forward_date or message.is_automatic_forward or "entities" in message.to_dict()
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id in DELEGATE_IDS:
-        await update.message.reply_text(
-            "✅ تم تسجيلك كمندوب بنجاح.\n"
-            "إذا لم تصلك الطلبات أو واجهت أي مشكلة، تواصل معنا عبر الرقم:\n"
-            "📞 0506260139"
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=(
+                "✅ تم تسجيلك كمندوب بنجاح.\n"
+                "إذا لم تصلك طلبات أو واجهت مشاكل تواصل معنا على: 0506260139"
+            )
         )
     else:
         await update.message.reply_text(
@@ -50,32 +46,42 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🚗 سيتواصل معك السائق عبر واتساب خلال 3 دقائق، كن بالانتظار.\n\n"
             "🔒 *ملاحظة:* رقم جوالك لن يظهر إلا للسائق الذي يقبل المشوار، لذلك ضروري تكتبه.\n"
             "❌ *لا توجد مشاوير شهرية*\n\n"
-            "⚠️ *ملاحظة جدًا مهمة:*\n"
-            "عزيزي العميل، لا تبخس السعر فإن البَخس منهي عنه شرعًا.\n"
-            "لقد سَعينا بكل جهد لتوفير أفضل خدمة لكم.\n"
-            "💡 نرجو كتابة *سعر مناسب ومعقول* لتسريع قبول الطلب من قِبل المناديب.\n\n"
-            "✅ تأكد دائمًا أن *خدمتكم وراحتكم غايتنا*.\n"
-            "🧑‍✈️ مناديبنا موثوقون وذو خبرة.",
+            "📌 *ملاحظة جداً مهمة:* عزيزي العميل لا تبخس السعر، فإن البخس منهي عنه.\n"
+            "نحن نسعى بكل جهدنا لنقدم لك أفضل خدمة، نتمنى كتابة السعر المناسب والمعقول\n"
+            "ولتسريع قبول الطلب من قبل المندوب.\n"
+            "✅ تأكد دائماً أن راحتكم غايتنا، ومناديبنا موثوقون.",
             parse_mode="Markdown"
         )
 
+def contains_forbidden(text):
+    lowered = text.lower()
+    for word in FORBIDDEN_KEYWORDS:
+        if word in lowered:
+            return True
+    return False
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+
+    if user_id in DELEGATE_IDS or user_id == ADMIN_ID:
+        return
+
     message = update.message
 
-    if user_id in DELEGATE_IDS:
+    if message.forward_date:
+        await message.reply_text("❌ عذراً، لا يُسمح بالرسائل المعاد توجيهها.")
         return
 
-    if message.forward_date or contains_forbidden_keywords(message.text):
-        await message.delete()
-        return
-
-    if is_forwarded_or_copied(message):
-        await message.reply_text("❌ لا يوجد لصق، اكتب مشوارك.")
+    if message.text != message.text.strip() or message.text != message.text.strip('\n'):
+        await message.reply_text("❌ لا يوجد لصق، اكتب مشوارك بنفسك.")
         return
 
     if len(message.text) > 400:
         await message.reply_text("⚠️ رسالتك طويلة جدًا، الرجاء تقصيرها.")
+        return
+
+    if contains_forbidden(message.text):
+        await context.bot.send_message(chat_id=ADMIN_ID, text=f"🚨 رسالة مشتبه بها:\n{message.text}")
         return
 
     phone_number = None
@@ -85,12 +91,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             break
 
     if not phone_number:
-        await message.reply_text("❌ يرجى تضمين رقم الجوال في رسالتك.")
+        await update.message.reply_text("❌ يرجى تضمين رقم الجوال في رسالتك.")
         return
 
     masked_number = mask_phone_number(phone_number)
     request_id = str(len(active_requests))
-
     request = {
         "id": request_id,
         "user_id": user_id,
@@ -101,8 +106,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
     active_requests.append(request)
-    with open("requests.json", "w", encoding="utf-8") as f:
-        json.dump(active_requests, f, ensure_ascii=False, indent=2)
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🚗 قبول المشوار", callback_data=f"accept_{request_id}")]
@@ -118,14 +121,43 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logging.error(f"فشل الإرسال إلى المندوب {delegate_id}: {e}")
 
-    await message.reply_text("✅ تم إرسال طلبك إلى المناديب، يرجى الانتظار...")
+    await update.message.reply_text("✅ تم إرسال طلبك إلى المناديب، يرجى الانتظار...")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user_id = query.from_user.id
+
     data = query.data
-
     if not data.startswith("accept_"):
-    return
+        return
 
+    request_id = data.split("_")[1]
+    for request in active_requests:
+        if request["id"] == request_id:
+            if request["accepted_by"] is not None:
+                await query.edit_message_text("❌ تم قبول هذا الطلب من مندوب آخر.")
+                return
+
+            request["accepted_by"] = query.from_user.id
+
+            await context.bot.send_message(
+                chat_id=query.from_user.id,
+                text=f"📞 رقم العميل: {request['phone_number']}"
+            )
+
+            await context.bot.send_message(
+                chat_id=request["user_id"],
+                text="✅ تم قبول طلبك من السائق، سيتواصل معك على الواتساب، كن بانتظاره."
+            )
+
+            await query.edit_message_reply_markup(reply_markup=None)
+            return
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(CallbackQueryHandler(button_handler))
+    print("✅ Bot is running...")
+    app.run_polling()
