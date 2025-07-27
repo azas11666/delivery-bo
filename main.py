@@ -9,7 +9,7 @@ TOKEN = "8407369465:AAFJ8MCRIkWoO2HiETILry7XeuHf81T1DBw"
 DELEGATE_IDS = [
     979025584, 6274276105, 1191690688, 8170847197,
     6934325493, 7829041114, 5089840611, 5867751923,
-    7059987819, 6907220336, 7453553320, 7317135212, 6545258494
+    7059987819, 6907220336, 7453553320, 7317135212, 6545258494, 7786225278
 
 ]
 
@@ -17,7 +17,7 @@ ADMIN_ID = 7799549664
 
 FORBIDDEN_KEYWORDS = [
     "إجازة", "تقرير", "زواج", "مكيفات", "مكيف", "مرضية", "مراجة", "مشهد",
-    "مرافق", "طبي", "متحررة", "واتساب", "سعر", "جميلة", "رقم", "056", "057", "058", "059"
+    "مرافق", "طبي", "متحررة", "سعر", "جميلة", "رقم", "056", "057", "058", "059"
 ]
 
 active_requests = []
@@ -69,10 +69,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     message = update.message
 
+    # رفض الرسائل المعاد توجيهها
     if message.forward_date:
         await message.reply_text("❌ عذراً، لا يُسمح بالرسائل المعاد توجيهها.")
         return
 
+    # رفض الرسائل المنسوخة
     if message.text != message.text.strip() or message.text != message.text.strip('\n'):
         await message.reply_text("❌ لا يوجد لصق، اكتب مشوارك بنفسك.")
         return
@@ -85,6 +87,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=ADMIN_ID, text=f"🚨 رسالة مشتبه بها:\n{message.text}")
         return
 
+    # استخراج رقم الجوال
     phone_number = None
     for word in message.text.split():
         if word.isdigit() and len(word) >= 9:
@@ -103,7 +106,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "message": message.text.replace(phone_number, masked_number),
         "phone_number": phone_number,
         "masked_number": masked_number,
-        "accepted_by": None
+        "accepted_by": None,
+        "message_ids": {}
     }
 
     active_requests.append(request)
@@ -112,13 +116,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🚗 قبول المشوار", callback_data=f"accept_{request_id}")]
     ])
 
+    # إرسال الطلب لكل مندوب
     for delegate_id in DELEGATE_IDS:
         try:
-            await context.bot.send_message(
+            sent = await context.bot.send_message(
                 chat_id=delegate_id,
                 text=f"🚕 طلب جديد!\n\n{request['message']}\n\n📞 رقم الجوال: {masked_number}",
                 reply_markup=keyboard
             )
+            request["message_ids"][delegate_id] = sent.message_id
         except Exception as e:
             logging.error(f"فشل الإرسال إلى المندوب {delegate_id}: {e}")
 
@@ -127,38 +133,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     data = query.data
+
     if not data.startswith("accept_"):
         return
 
-    request_id = data.split("_")[1]
-    for request in active_requests:
-        if request["id"] == request_id:
-            if request["accepted_by"] is not None:
-                await query.edit_message_text("❌ تم قبول هذا الطلب من مندوب آخر.")
-                return
-
-            request["accepted_by"] = query.from_user.id
-
-            await context.bot.send_message(
-                chat_id=query.from_user.id,
-                text=f"📞 رقم العميل: {request['phone_number']}"
-            )
-
-            await context.bot.send_message(
-                chat_id=request["user_id"],
-                text="✅ تم قبول طلبك من السائق، سيتواصل معك على الواتساب، كن بانتظاره."
-            )
-
-            await query.edit_message_reply_markup(reply_markup=None)
-            return
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    print("✅ Bot is running...")
-    app.run_polling()
+    request_id = data.spl_
