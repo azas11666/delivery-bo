@@ -108,4 +108,65 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     active_requests.append(request)
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🚗 قبول المشوار", callback_data=f"accept_{r]()
+        [InlineKeyboardButton("🚗 قبول المشوار", callback_data=f"accept_{request_id}")]
+    ])
+
+    for delegate_id in DELEGATE_IDS:
+        try:
+            sent = await context.bot.send_message(
+                chat_id=delegate_id,
+                text=f"🚕 طلب جديد!\n\n{request['message']}\n\n📞 رقم الجوال: {masked_number}",
+                reply_markup=keyboard
+            )
+            request["message_ids"][delegate_id] = sent.message_id
+        except Exception as e:
+            logging.error(f"فشل الإرسال إلى المندوب {delegate_id}: {e}")
+
+    await update.message.reply_text("✅ تم إرسال طلبك إلى المناديب، يرجى الانتظار...")
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if not data.startswith("accept_"):
+        return
+
+    request_id = data.split("_")[1]
+    for request in active_requests:
+        if request["id"] == request_id:
+            if request["accepted_by"] is not None:
+                await query.edit_message_text("❌ تم قبول هذا الطلب من مندوب آخر.")
+                return
+
+            request["accepted_by"] = query.from_user.id
+
+            await context.bot.send_message(
+                chat_id=query.from_user.id,
+                text=f"📞 رقم العميل: {request['phone_number']}"
+            )
+
+            await context.bot.send_message(
+                chat_id=request["user_id"],
+                text="✅ تم قبول طلبك من السائق، سيتواصل معك على الواتساب، كن بانتظاره."
+            )
+
+            for delegate_id, msg_id in request["message_ids"].items():
+                try:
+                    await context.bot.edit_message_reply_markup(
+                        chat_id=delegate_id,
+                        message_id=msg_id,
+                        reply_markup=None
+                    )
+                except Exception as e:
+                    logging.warning(f"فشل حذف الزر من رسالة مندوب {delegate_id}: {e}")
+            return
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(CallbackQueryHandler(button_handler))
+    print("✅ Bot is running...")
+    app.run_polling()
