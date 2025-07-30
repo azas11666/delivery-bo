@@ -29,7 +29,7 @@ active_requests = []
 pending_users = set()
 lock = asyncio.Lock()
 
-def log_to_excel(request, driver_id):
+def log_to_excel(request, driver_id, bot):
     file_name = "trips_log.xlsx"
     headers = ["التاريخ", "رقم العميل", "الطلب", "ID العميل", "ID المندوب"]
 
@@ -53,6 +53,8 @@ def log_to_excel(request, driver_id):
     ])
 
     wb.save(file_name)
+
+    bot.send_document(chat_id=ADMIN_ID, document=open(file_name, "rb"))
 
 async def send_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
@@ -187,7 +189,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return
 
                 request["accepted_by"] = query.from_user.id
-                log_to_excel(request, query.from_user.id)
+                log_to_excel(request, query.from_user.id, context.bot)
 
                 await context.bot.send_message(
                     chat_id=query.from_user.id,
