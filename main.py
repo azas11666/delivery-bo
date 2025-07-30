@@ -4,6 +4,7 @@ import os
 from datetime import datetime
 from openpyxl import Workbook, load_workbook
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ChatAction
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
 TOKEN = "8407369465:AAFJ8MCRIkWoO2HiETILry7XeuHf81T1DBw"
@@ -14,6 +15,8 @@ DELEGATE_IDS = [
     7059987819, 6907220336, 7453553320, 7317135212,
     6545258494, 7786225278
 ]
+
+ADMIN_ID = 7799549664
 
 FORBIDDEN_KEYWORDS = [
     "إجازة", "تقرير", "زواج", "مكيفات", "مكيف", "مرضية", "مراجة", "مشهد",
@@ -50,6 +53,19 @@ def log_to_excel(request, driver_id):
     ])
 
     wb.save(file_name)
+
+async def send_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ ليس لديك صلاحية استخدام هذا الأمر.")
+        return
+
+    file_path = "trips_log.xlsx"
+    if not os.path.exists(file_path):
+        await update.message.reply_text("❌ لا يوجد حالياً ملف سجل.")
+        return
+
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_DOCUMENT)
+    await context.bot.send_document(chat_id=update.effective_chat.id, document=open(file_path, "rb"))
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -198,6 +214,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("log", send_log))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_handler))
     print("✅ Bot is running...")
