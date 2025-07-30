@@ -1,5 +1,8 @@
 import logging
 import asyncio
+import os
+from datetime import datetime
+from openpyxl import Workbook, load_workbook
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
@@ -22,6 +25,31 @@ FORBIDDEN_KEYWORDS = [
 active_requests = []
 pending_users = set()
 lock = asyncio.Lock()
+
+def log_to_excel(request, driver_id):
+    file_name = "trips_log.xlsx"
+    headers = ["التاريخ", "رقم العميل", "الطلب", "ID العميل", "ID المندوب"]
+
+    if not os.path.exists(file_name):
+        wb = Workbook()
+        ws = wb.active
+        ws.append(headers)
+        wb.save(file_name)
+
+    wb = load_workbook(file_name)
+    ws = wb.active
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    ws.append([
+        now,
+        request["phone_number"],
+        request["message"],
+        request["user_id"],
+        driver_id
+    ])
+
+    wb.save(file_name)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -143,6 +171,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return
 
                 request["accepted_by"] = query.from_user.id
+                log_to_excel(request, query.from_user.id)
 
                 await context.bot.send_message(
                     chat_id=query.from_user.id,
