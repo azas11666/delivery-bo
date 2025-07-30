@@ -14,7 +14,9 @@ DELEGATE_IDS = [
 
 FORBIDDEN_KEYWORDS = [
     "إجازة", "تقرير", "زواج", "مكيفات", "مكيف", "مرضية", "مراجة", "مشهد",
-    "مرافق", "طبي", "متحررة", "سعر", "جميلة", "رقم", "056", "057", "058", "059"
+    "مرافق", "طبي", "متحررة", "سعر", "جميلة", "رقم", "056", "057", "058", "059",
+    "http", "https", ".com", ".net", ".org", ".crypto", "ethereum", "wallet",
+    "free", "claim", "airdrop", "verify", "eth", "connect", "collect", "blockchain"
 ]
 
 active_requests = []
@@ -78,6 +80,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if contains_forbidden(message.text):
+        await update.message.reply_text("🚫 رسالتك تحتوي على محتوى غير مسموح به.")
         return
 
     phone_number = None
