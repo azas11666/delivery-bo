@@ -19,31 +19,26 @@ DELEGATE_IDS = [
 
 FORBIDDEN_KEYWORDS = [
     "إجازة", "تقرير", "زواج", "مكيفات", "مكيف", "مرضية", "مراجة", "مشهد",
-    "مرافق", "طبي", "متحررة", "جميلة", "056", "057", "058", "059",
+    "مرافق", "طبي", "متحررة", "سعر", "جميلة", "رقم", "056", "057", "058", "059",
     "http", "https", ".com", ".net", ".org", ".crypto", "ethereum", "wallet",
     "free", "claim", "airdrop", "verify", "eth", "connect", "collect", "blockchain"
 ]
 
 active_requests = []
 pending_users = set()
-registered_users = set()
 lock = asyncio.Lock()
 
 def log_to_excel(request, driver_id, bot):
     file_name = "trips_log.xlsx"
     headers = ["التاريخ", "رقم العميل", "الطلب", "ID العميل", "ID المندوب"]
-
     if not os.path.exists(file_name):
         wb = Workbook()
         ws = wb.active
         ws.append(headers)
         wb.save(file_name)
-
     wb = load_workbook(file_name)
     ws = wb.active
-
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
     ws.append([
         now,
         request["phone_number"],
@@ -51,21 +46,45 @@ def log_to_excel(request, driver_id, bot):
         request["user_id"],
         driver_id
     ])
-
     wb.save(file_name)
-
     bot.send_document(chat_id=ADMIN_ID, document=open(file_name, "rb"))
 
-def save_user_id(user_id):
-    with open("clients.txt", "a", encoding="utf-8") as f:
-        f.write(str(user_id) + "\n")
+def log_client_id(user_id):
+    file_path = "clients.txt"
+    if not os.path.exists(file_path):
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(str(user_id) + "\n")
+    else:
+        with open(file_path, "r+", encoding="utf-8") as f:
+            lines = f.read().splitlines()
+            if str(user_id) not in lines:
+                f.write(str(user_id) + "\n")
+
+async def send_clients(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ ليس لديك صلاحية.")
+        return
+    file_path = "clients.txt"
+    if not os.path.exists(file_path):
+        await update.message.reply_text("❌ لا يوجد عملاء مسجلين.")
+        return
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_DOCUMENT)
+    await context.bot.send_document(chat_id=update.effective_chat.id, document=open(file_path, "rb"))
+
+async def send_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ ليس لديك صلاحية.")
+        return
+    file_path = "trips_log.xlsx"
+    if not os.path.exists(file_path):
+        await update.message.reply_text("❌ لا يوجد حالياً ملف سجل.")
+        return
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_DOCUMENT)
+    await context.bot.send_document(chat_id=update.effective_chat.id, document=open(file_path, "rb"))
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id not in registered_users:
-        save_user_id(user_id)
-        registered_users.add(user_id)
-
+    log_client_id(user_id)
     if user_id in DELEGATE_IDS:
         await context.bot.send_message(
             chat_id=user_id,
@@ -96,45 +115,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id in DELEGATE_IDS:
         return
-
-    if user_id not in registered_users:
-        save_user_id(user_id)
-        registered_users.add(user_id)
-
+    log_client_id(user_id)
     if user_id in pending_users:
-        await update.message.reply_text("⚠️ طلبك السابق قيد المعالجة، الرجاء الانتظار قليلاً.")
+        await update.message.reply_text("⚠️ طلبك السابق قيد المعالجة، الرجاء الانتظار.")
         return
-
     message = update.message
-
     if message.forward_date:
         await message.reply_text("❌ لا يُسمح بالرسائل المعاد توجيهها.")
         return
-
     if message.text != message.text.strip() or message.text != message.text.strip('\n'):
         await message.reply_text("❌ لا يوجد لصق، اكتب مشوارك بنفسك.")
         return
-
     if len(message.text) > 400:
         await message.reply_text("⚠️ رسالتك طويلة جدًا، الرجاء تقصيرها.")
         return
-
     if contains_forbidden(message.text):
         await update.message.reply_text("🚫 رسالتك تحتوي على محتوى غير مسموح به.")
         return
-
     phone_number = None
     for word in message.text.split():
         if word.isdigit() and len(word) >= 9:
             phone_number = word
             break
-
     if not phone_number:
         await update.message.reply_text("❌ يرجى تضمين رقم الجوال في رسالتك.")
         return
-
     pending_users.add(user_id)
-
     request_id = str(len(active_requests))
     request = {
         "id": request_id,
@@ -144,13 +150,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "accepted_by": None,
         "message_ids": {}
     }
-
     active_requests.append(request)
-
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🚗 قبول المشوار", callback_data=f"accept_{request_id}")]
     ])
-
     for delegate_id in DELEGATE_IDS:
         try:
             sent = await context.bot.send_message(
@@ -159,9 +162,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=keyboard
             )
             request["message_ids"][delegate_id] = sent.message_id
-        except Exception as e:
-            logging.error(f"فشل الإرسال إلى المندوب {delegate_id}: {e}")
-
+        except Exception:
+            pass
     await update.message.reply_text("✅ تم إرسال طلبك إلى المناديب، يرجى الانتظار...")
     pending_users.discard(user_id)
 
@@ -169,32 +171,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
-
     if not data.startswith("accept_"):
         return
-
     request_id = data.split("_")[1]
-
     async with lock:
         for request in active_requests:
             if request["id"] == request_id:
                 if request["accepted_by"] is not None:
                     await query.edit_message_text("❌ تم قبول هذا الطلب من مندوب آخر.")
                     return
-
                 request["accepted_by"] = query.from_user.id
                 log_to_excel(request, query.from_user.id, context.bot)
-
                 await context.bot.send_message(
                     chat_id=query.from_user.id,
                     text=f"📞 رقم العميل: {request['phone_number']}"
                 )
-
                 await context.bot.send_message(
                     chat_id=request["user_id"],
-                    text="✅ تم قبول طلبك من السائق، سيتواصل معك على الواتساب، كن بانتظاره."
+                    text="✅ تم قبول طلبك من السائق، سيتواصل معك على الواتساب."
                 )
-
                 for delegate_id, msg_id in request["message_ids"].items():
                     try:
                         await context.bot.edit_message_reply_markup(
@@ -202,28 +197,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             message_id=msg_id,
                             reply_markup=None
                         )
-                    except Exception as e:
-                        logging.warning(f"فشل حذف الزر من مندوب {delegate_id}: {e}")
+                    except Exception:
+                        pass
                 return
-
-async def send_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("❌ ليس لديك صلاحية استخدام هذا الأمر.")
-        return
-
-    file_path = "trips_log.xlsx"
-    if not os.path.exists(file_path):
-        await update.message.reply_text("❌ لا يوجد حالياً ملف سجل.")
-        return
-
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_DOCUMENT)
-    await context.bot.send_document(chat_id=update.effective_chat.id, document=open(file_path, "rb"))
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("log", send_log))
+    app.add_handler(CommandHandler("clients", send_clients))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_handler))
     print("✅ Bot is running...")
