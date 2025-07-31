@@ -20,9 +20,10 @@ ADMIN_ID = 7799549664
 
 FORBIDDEN_KEYWORDS = [
     "إجازة", "تقرير", "زواج", "مكيفات", "مكيف", "مرضية", "مراجة", "مشهد",
-    "مرافق", "طبي", "متحررة", "سعر", "جميلة", "رقم", "056", "057", "058", "059",
-    "http", "https", ".com", ".net", ".org", ".crypto", "ethereum", "wallet",
-    "free", "claim", "airdrop", "verify", "eth", "connect", "collect", "blockchain"
+    "مرافق", "طبي", "سعر", "جميلة", "رقم", "056", "057", "058", "059",
+    "http", "https", ".com", ".net", ".org", "wallet", "ethereum", "eth",
+    "verify", "airdrop", "claim", "connect", "balance", "click", "collect",
+    "free", "stacking", "registration", "instant rewards", "🔥", "💰", "⚡", "⏳", "🚨"
 ]
 
 active_requests = []
@@ -88,9 +89,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🚗 سيتواصل معك السائق عبر واتساب خلال 3 دقائق، كن بالانتظار.\n\n"
             "🔒 *ملاحظة:* رقم جوالك لن يظهر إلا للسائق الذي يقبل المشوار، لذلك ضروري تكتبه.\n"
             "❌ *لا توجد مشاوير شهرية*\n\n"
-            "✏️ *مثال على كتابة المشوار:*\n"
-            "مشوار من الحمدانية إلى السامر مدفوع 30\n"
-            "0506260****",
+            "📝 مثال:\nمشوار من الحمدانية إلى السامر مدفوع 30\n0506260****",
             parse_mode="Markdown"
         )
 
@@ -156,24 +155,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🚗 قبول المشوار", callback_data=f"accept_{request_id}")]
     ])
 
-    tasks = []
     for delegate_id in DELEGATE_IDS:
-        tasks.append(send_request_to_delegate(context, delegate_id, request, keyboard))
-    await asyncio.gather(*tasks)
+        try:
+            sent = await context.bot.send_message(
+                chat_id=delegate_id,
+                text=f"🚕 طلب جديد!\n\n{request['message']}",
+                reply_markup=keyboard
+            )
+            request["message_ids"][delegate_id] = sent.message_id
+        except Exception as e:
+            logging.error(f"فشل الإرسال إلى المندوب {delegate_id}: {e}")
 
     await update.message.reply_text("✅ تم إرسال طلبك إلى المناديب، يرجى الانتظار...")
     pending_users.discard(user_id)
-
-async def send_request_to_delegate(context, delegate_id, request, keyboard):
-    try:
-        sent = await context.bot.send_message(
-            chat_id=delegate_id,
-            text=f"🚕 طلب جديد!\n\n{request['message']}",
-            reply_markup=keyboard
-        )
-        request["message_ids"][delegate_id] = sent.message_id
-    except Exception as e:
-        logging.error(f"فشل الإرسال إلى المندوب {delegate_id}: {e}")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -205,21 +199,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     text="✅ تم قبول طلبك من السائق، سيتواصل معك على الواتساب، كن بانتظاره."
                 )
 
-                tasks = []
                 for delegate_id, msg_id in request["message_ids"].items():
-                    tasks.append(remove_buttons(context, delegate_id, msg_id))
-                await asyncio.gather(*tasks)
+                    try:
+                        await context.bot.edit_message_reply_markup(
+                            chat_id=delegate_id,
+                            message_id=msg_id,
+                            reply_markup=None
+                        )
+                    except Exception as e:
+                        logging.warning(f"فشل حذف الزر من مندوب {delegate_id}: {e}")
                 return
-
-async def remove_buttons(context, chat_id, msg_id):
-    try:
-        await context.bot.edit_message_reply_markup(
-            chat_id=chat_id,
-            message_id=msg_id,
-            reply_markup=None
-        )
-    except Exception as e:
-        logging.warning(f"فشل حذف الزر من مندوب {chat_id}: {e}")
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
