@@ -8,6 +8,7 @@ from telegram.constants import ChatAction
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
 TOKEN = "8407369465:AAFJ8MCRIkWoO2HiETILry7XeuHf81T1DBw"
+ADMIN_ID = 7799549664
 
 DELEGATE_IDS = [
     979025584, 6274276105, 1191690688, 8170847197,
@@ -16,18 +17,16 @@ DELEGATE_IDS = [
     6545258494, 7786225278
 ]
 
-ADMIN_ID = 7799549664
-
 FORBIDDEN_KEYWORDS = [
     "إجازة", "تقرير", "زواج", "مكيفات", "مكيف", "مرضية", "مراجة", "مشهد",
-    "مرافق", "طبي", "سعر", "جميلة", "رقم", "056", "057", "058", "059",
-    "http", "https", ".com", ".net", ".org", "wallet", "ethereum", "eth",
-    "verify", "airdrop", "claim", "connect", "balance", "click", "collect",
-    "free", "stacking", "registration", "instant rewards", "🔥", "💰", "⚡", "⏳", "🚨"
+    "مرافق", "طبي", "متحررة", "جميلة", "056", "057", "058", "059",
+    "http", "https", ".com", ".net", ".org", ".crypto", "ethereum", "wallet",
+    "free", "claim", "airdrop", "verify", "eth", "connect", "collect", "blockchain"
 ]
 
 active_requests = []
 pending_users = set()
+registered_users = set()
 lock = asyncio.Lock()
 
 def log_to_excel(request, driver_id, bot):
@@ -57,21 +56,16 @@ def log_to_excel(request, driver_id, bot):
 
     bot.send_document(chat_id=ADMIN_ID, document=open(file_name, "rb"))
 
-async def send_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("❌ ليس لديك صلاحية استخدام هذا الأمر.")
-        return
-
-    file_path = "trips_log.xlsx"
-    if not os.path.exists(file_path):
-        await update.message.reply_text("❌ لا يوجد حالياً ملف سجل.")
-        return
-
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_DOCUMENT)
-    await context.bot.send_document(chat_id=update.effective_chat.id, document=open(file_path, "rb"))
+def save_user_id(user_id):
+    with open("clients.txt", "a", encoding="utf-8") as f:
+        f.write(str(user_id) + "\n")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    if user_id not in registered_users:
+        save_user_id(user_id)
+        registered_users.add(user_id)
+
     if user_id in DELEGATE_IDS:
         await context.bot.send_message(
             chat_id=user_id,
@@ -81,15 +75,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "مرحباً فيك ببوت *مشاوير جدة* 👋\n\n"
             "عزيزي العميل، الرجاء كتابة مشوارك بالتفاصيل التالية:\n"
-            "1️⃣ *اذكر مشوارك: من فين إلى وين*\n"
-            "2️⃣ *اذكر السعر المدفوع*\n"
-            "3️⃣ *اذكر رقم جوالك*\n\n"
+            "مثال: مشوار من الحمدانية إلى السامر مدفوع 30\n"
+            "0506260****\n\n"
             "🟢 *اكتبها في رسالة واحدة فقط.*\n"
             "بعدها سيتم إرسال طلبك لأكثر من 100 مندوب موثوق.\n"
             "🚗 سيتواصل معك السائق عبر واتساب خلال 3 دقائق، كن بالانتظار.\n\n"
-            "🔒 *ملاحظة:* رقم جوالك لن يظهر إلا للسائق الذي يقبل المشوار، لذلك ضروري تكتبه.\n"
-            "❌ *لا توجد مشاوير شهرية*\n\n"
-            "📝 مثال:\nمشوار من الحمدانية إلى السامر مدفوع 30\n0506260****",
+            "🔒 *ملاحظة:* رقم جوالك لن يظهر إلا للسائق الذي يقبل المشوار.\n"
+            "❌ *لا توجد مشاوير شهرية*",
             parse_mode="Markdown"
         )
 
@@ -105,14 +97,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in DELEGATE_IDS:
         return
 
+    if user_id not in registered_users:
+        save_user_id(user_id)
+        registered_users.add(user_id)
+
     if user_id in pending_users:
-        await update.message.reply_text("⚠️ طلبك السابق قيد المعالجة، الرجاء الانتظار قليلاً قبل إرسال طلب جديد.")
+        await update.message.reply_text("⚠️ طلبك السابق قيد المعالجة، الرجاء الانتظار قليلاً.")
         return
 
     message = update.message
 
     if message.forward_date:
-        await message.reply_text("❌ عذراً، لا يُسمح بالرسائل المعاد توجيهها.")
+        await message.reply_text("❌ لا يُسمح بالرسائل المعاد توجيهها.")
         return
 
     if message.text != message.text.strip() or message.text != message.text.strip('\n'):
@@ -209,6 +205,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except Exception as e:
                         logging.warning(f"فشل حذف الزر من مندوب {delegate_id}: {e}")
                 return
+
+async def send_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ ليس لديك صلاحية استخدام هذا الأمر.")
+        return
+
+    file_path = "trips_log.xlsx"
+    if not os.path.exists(file_path):
+        await update.message.reply_text("❌ لا يوجد حالياً ملف سجل.")
+        return
+
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_DOCUMENT)
+    await context.bot.send_document(chat_id=update.effective_chat.id, document=open(file_path, "rb"))
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
