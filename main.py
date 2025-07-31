@@ -28,26 +28,28 @@ active_requests = []
 pending_users = set()
 lock = asyncio.Lock()
 
-def log_to_excel(request, driver_id, bot):
+def log_to_excel(request, driver_id):
     file_name = "trips_log.xlsx"
     headers = ["التاريخ", "رقم العميل", "الطلب", "ID العميل", "ID المندوب"]
-    if not os.path.exists(file_name):
-        wb = Workbook()
-        ws = wb.active
-        ws.append(headers)
+    try:
+        if not os.path.exists(file_name):
+            wb = Workbook()
+            ws = wb.active
+            ws.append(headers)
+        else:
+            wb = load_workbook(file_name)
+            ws = wb.active
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ws.append([
+            now,
+            request["phone_number"],
+            request["message"],
+            request["user_id"],
+            driver_id
+        ])
         wb.save(file_name)
-    wb = load_workbook(file_name)
-    ws = wb.active
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ws.append([
-        now,
-        request["phone_number"],
-        request["message"],
-        request["user_id"],
-        driver_id
-    ])
-    wb.save(file_name)
-    bot.send_document(chat_id=ADMIN_ID, document=open(file_name, "rb"))
+    except:
+        pass
 
 def log_client_id(user_id):
     file_path = "clients.txt"
@@ -154,16 +156,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🚗 قبول المشوار", callback_data=f"accept_{request_id}")]
     ])
+    tasks = []
     for delegate_id in DELEGATE_IDS:
-        try:
-            sent = await context.bot.send_message(
-                chat_id=delegate_id,
-                text=f"🚕 طلب جديد!\n\n{request['message']}",
-                reply_markup=keyboard
-            )
-            request["message_ids"][delegate_id] = sent.message_id
-        except Exception:
-            pass
+        tasks.append(context.bot.send_message(
+            chat_id=delegate_id,
+            text=f"🚕 طلب جديد!\n\n{request['message']}",
+            reply_markup=keyboard
+        ))
+    responses = await asyncio.gather(*tasks, return_exceptions=True)
+    for i, response in enumerate(responses):
+        if isinstance(response, Exception):
+            continue
+        request["message_ids"][DELEGATE_IDS[i]] = response.message_id
     await update.message.reply_text("✅ تم إرسال طلبك إلى المناديب، يرجى الانتظار...")
     pending_users.discard(user_id)
 
@@ -181,7 +185,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await query.edit_message_text("❌ تم قبول هذا الطلب من مندوب آخر.")
                     return
                 request["accepted_by"] = query.from_user.id
-                log_to_excel(request, query.from_user.id, context.bot)
+                log_to_excel(request, query.from_user.id)
                 await context.bot.send_message(
                     chat_id=query.from_user.id,
                     text=f"📞 رقم العميل: {request['phone_number']}"
@@ -197,7 +201,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             message_id=msg_id,
                             reply_markup=None
                         )
-                    except Exception:
+                    except:
                         pass
                 return
 
