@@ -21,7 +21,8 @@ FORBIDDEN_KEYWORDS = [
     "إجازة", "تقرير", "زواج", "مكيفات", "مكيف", "مرضية", "مراجة", "مشهد",
     "مرافق", "طبي", "متحررة", "سعر", "جميلة", "رقم", "056", "057", "058", "059",
     "http", "https", ".com", ".net", ".org", ".crypto", "ethereum", "wallet",
-    "free", "claim", "airdrop", "verify", "eth", "connect", "collect", "blockchain"
+    "free", "claim", "airdrop", "verify", "eth", "connect", "collect", "blockchain",
+    "jetacas"
 ]
 
 active_requests = []
@@ -156,13 +157,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🚗 قبول المشوار", callback_data=f"accept_{request_id}")]
     ])
-    tasks = []
-    for delegate_id in DELEGATE_IDS:
-        tasks.append(context.bot.send_message(
-            chat_id=delegate_id,
-            text=f"🚕 طلب جديد!\n\n{request['message']}",
-            reply_markup=keyboard
-        ))
+    tasks = [context.bot.send_message(chat_id=did, text=f"🚕 طلب جديد!\n\n{request['message']}", reply_markup=keyboard) for did in DELEGATE_IDS]
     responses = await asyncio.gather(*tasks, return_exceptions=True)
     for i, response in enumerate(responses):
         if isinstance(response, Exception):
@@ -186,21 +181,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return
                 request["accepted_by"] = query.from_user.id
                 log_to_excel(request, query.from_user.id)
-                await context.bot.send_message(
-                    chat_id=query.from_user.id,
-                    text=f"📞 رقم العميل: {request['phone_number']}"
-                )
-                await context.bot.send_message(
-                    chat_id=request["user_id"],
-                    text="✅ تم قبول طلبك من السائق، سيتواصل معك على الواتساب."
-                )
-                for delegate_id, msg_id in request["message_ids"].items():
+                await context.bot.send_message(chat_id=query.from_user.id, text=f"📞 رقم العميل: {request['phone_number']}")
+                await context.bot.send_message(chat_id=request["user_id"], text="✅ تم قبول طلبك من السائق، سيتواصل معك على الواتساب.")
+                for did, msg_id in request["message_ids"].items():
                     try:
-                        await context.bot.edit_message_reply_markup(
-                            chat_id=delegate_id,
-                            message_id=msg_id,
-                            reply_markup=None
-                        )
+                        await context.bot.edit_message_reply_markup(chat_id=did, message_id=msg_id, reply_markup=None)
                     except:
                         pass
                 return
