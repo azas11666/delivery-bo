@@ -14,7 +14,7 @@ DELEGATE_IDS = [
     979025584, 1191690688, 8170847197,
     6934325493, 7829041114, 5089840611, 5867751923,
     7059987819, 6907220336, 7453553320, 7317135212,
-    6545258494, 7786225278, 7029907146, 7731731836, 1097659084, 8076843839, 
+    6545258494, 7786225278, 7029907146, 7731731836, 1097659084, 8076843839, 7313682176, 
 ]
 
 FORBIDDEN_KEYWORDS = [
@@ -84,6 +84,29 @@ async def send_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_DOCUMENT)
     await context.bot.send_document(chat_id=update.effective_chat.id, document=open(file_path, "rb"))
+
+async def send_log_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ ليس لديك صلاحية.")
+        return
+    file_path = "trips_log.xlsx"
+    if not os.path.exists(file_path):
+        await update.message.reply_text("❌ لا يوجد سجل مشاوير.")
+        return
+    wb = load_workbook(file_path)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))[1:]
+    if not rows:
+        await update.message.reply_text("⚠️ لا يوجد بيانات في السجل.")
+        return
+    for row in rows:
+        date, phone, msg, user_id, driver_id = row
+        text = f"""📅 *{date}*
+👤 *العميل:* `{user_id}`
+📞 *رقم الجوال:* `{phone}`
+📝 *الطلب:* {msg}
+🚗 *المندوب:* `{driver_id}`"""
+        await update.message.reply_text(text, parse_mode="Markdown")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -195,6 +218,7 @@ if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("log", send_log))
+    app.add_handler(CommandHandler("log_text", send_log_text))
     app.add_handler(CommandHandler("clients", send_clients))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_handler))
