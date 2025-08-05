@@ -1,231 +1,68 @@
-import logging
-import asyncio
 import os
+import whisper
+import logging
 from datetime import datetime
 from openpyxl import Workbook, load_workbook
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.constants import ChatAction
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram import Update
+from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, ContextTypes, filters
 
 TOKEN = "8407369465:AAFJ8MCRIkWoO2HiETILry7XeuHf81T1DBw"
-ADMIN_ID = 7799549664
+EXCEL_FILE = "daily_expenses.xlsx"
 
-DELEGATE_IDS = [
-    979025584, 1191690688, 8170847197,
-    6934325493, 7829041114, 5089840611, 5867751923,
-    7059987819, 6907220336, 7453553320, 7317135212,
-    6545258494, 7786225278, 7029907146, 7731731836, 1097659084, 8076843839, 7313682176, 7290225311, 982026678, 7825812182,
-]
+model = whisper.load_model("base")
 
-FORBIDDEN_KEYWORDS = [
-    "إجازة", "تقرير", "زواج", "مكيفات", "مكيف", "مرضية", "مراجة", "مشهد",
-    "مرافق", "طبي", "متحررة", "سعر", "جميلة", "رقم", "056", "057", "058", "059",
-    "http", "https", ".com", ".net", ".org", ".crypto", "ethereum", "wallet",
-    "free", "claim", "airdrop", "verify", "eth", "connect", "collect", "blockchain",
-    "jetacas"
-]
-
-active_requests = []
-pending_users = set()
-pending_delegates = {}
-lock = asyncio.Lock()
-
-def log_to_excel(request, driver_id):
-    file_name = "trips_log.xlsx"
-    headers = ["التاريخ", "رقم العميل", "الطلب", "ID العميل", "ID المندوب"]
-    try:
-        if not os.path.exists(file_name):
-            wb = Workbook()
-            ws = wb.active
-            ws.append(headers)
-        else:
-            wb = load_workbook(file_name)
-            ws = wb.active
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        ws.append([
-            now,
-            request["phone_number"],
-            request["message"],
-            request["user_id"],
-            driver_id
-        ])
-        wb.save(file_name)
-    except:
-        pass
-
-def log_client_id(user_id):
-    file_path = "clients.txt"
-    if not os.path.exists(file_path):
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(str(user_id) + "\n")
-    else:
-        with open(file_path, "r+", encoding="utf-8") as f:
-            lines = f.read().splitlines()
-            if str(user_id) not in lines:
-                f.write(str(user_id) + "\n")
-
-async def send_clients(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("❌ ليس لديك صلاحية.")
-        return
-    file_path = "clients.txt"
-    if not os.path.exists(file_path):
-        await update.message.reply_text("❌ لا يوجد عملاء مسجلين.")
-        return
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_DOCUMENT)
-    await context.bot.send_document(chat_id=update.effective_chat.id, document=open(file_path, "rb"))
-
-async def send_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("❌ ليس لديك صلاحية.")
-        return
-    file_path = "trips_log.xlsx"
-    if not os.path.exists(file_path):
-        await update.message.reply_text("❌ لا يوجد حالياً ملف سجل.")
-        return
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_DOCUMENT)
-    await context.bot.send_document(chat_id=update.effective_chat.id, document=open(file_path, "rb"))
-
-async def send_log_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("❌ ليس لديك صلاحية.")
-        return
-    file_path = "trips_log.xlsx"
-    if not os.path.exists(file_path):
-        await update.message.reply_text("❌ لا يوجد سجل مشاوير.")
-        return
-    wb = load_workbook(file_path)
+if not os.path.exists(EXCEL_FILE):
+    wb = Workbook()
     ws = wb.active
-    rows = list(ws.iter_rows(values_only=True))[1:]
-    if not rows:
-        await update.message.reply_text("⚠️ لا يوجد بيانات في السجل.")
-        return
-    for row in rows:
-        date, phone, msg, user_id, driver_id = row
-        text = f"""📅 *{date}*
-👤 *العميل:* `{user_id}`
-📞 *رقم الجوال:* `{phone}`
-📝 *الطلب:* {msg}
-🚗 *المندوب:* `{driver_id}`"""
-        await update.message.reply_text(text, parse_mode="Markdown")
+    ws.append(["التاريخ", "الفئة", "العملية", "المبلغ"])
+    wb.save(EXCEL_FILE)
+
+logging.basicConfig(level=logging.INFO)
+
+def extract_expenses(text):
+    import re
+    category_keywords = {
+        "سيارة": "سيارة",
+        "بنزين": "سيارة",
+        "ملابس": "ملابس",
+        "أكل": "أكل",
+        "مطعم": "أكل",
+        "بيت": "سكن",
+        "إيجار": "سكن"
+    }
+    transaction_type = "خسارة" if "صرف" in text or "دفعت" in text else "ربح"
+    matches = re.findall(r'(\d+)\s*ريال', text)
+    category = "أخرى"
+    for word in category_keywords:
+        if word in text:
+            category = category_keywords[word]
+            break
+    amount = int(matches[0]) if matches else 0
+    return category, transaction_type, amount
+
+def save_to_excel(category, transaction_type, amount):
+    wb = load_workbook(EXCEL_FILE)
+    ws = wb.active
+    date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ws.append([date_str, category, transaction_type, amount])
+    wb.save(EXCEL_FILE)
+
+async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    file = await update.message.voice.get_file()
+    file_path = "voice.ogg"
+    await file.download_to_drive(file_path)
+    result = model.transcribe(file_path, language="ar")
+    text = result["text"]
+    category, transaction_type, amount = extract_expenses(text)
+    save_to_excel(category, transaction_type, amount)
+    await update.message.reply_text(f"✅ تم تسجيل العملية:\nالفئة: {category}\nالعملية: {transaction_type}\nالمبلغ: {amount} ريال")
+    os.remove(file_path)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    log_client_id(user_id)
-    if user_id in DELEGATE_IDS:
-        await context.bot.send_message(chat_id=user_id, text="✅ تم تسجيلك كمندوب بنجاح.\nإذا لم تصلك طلبات أو واجهت مشاكل تواصل معنا على: 0506260139")
-    else:
-        await update.message.reply_text(
-            "مرحباً فيك ببوت *مشاوير جدة* 👋\n\n"
-            "إذا كنت مندوب وتريد التسجيل:\n"
-            "📩 أرسل الرسالة التالية:\n\n"
-            "#9981\nالاسم الكامل ورقم الجوال\n\n"
-            "🔒 الإدارة ستراجع طلبك وترد عليك.\n\n"
-            "أما إذا كنت عميل:\n"
-            "اكتب مشوارك مع رقم جوالك في رسالة واحدة.",
-            parse_mode="Markdown"
-        )
-
-def contains_forbidden(text):
-    lowered = text.lower()
-    for word in FORBIDDEN_KEYWORDS:
-        if word in lowered:
-            return True
-    return False
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    message = update.message.text
-
-    if message.startswith("#9981"):
-        pending_delegates[user_id] = message
-        await context.bot.send_message(chat_id=ADMIN_ID, text=f"📥 طلب تسجيل مندوب:\n\n{message}\n\nID: `{user_id}`", parse_mode="Markdown")
-        await update.message.reply_text("📨 تم إرسال طلبك للإدارة. سيتم الرد عليك بعد المراجعة.")
-        return
-
-    if user_id in DELEGATE_IDS:
-        return
-
-    log_client_id(user_id)
-    if user_id in pending_users:
-        await update.message.reply_text("⚠️ طلبك السابق قيد المعالجة، الرجاء الانتظار.")
-        return
-    msg = update.message
-    if msg.forward_date:
-        await msg.reply_text("❌ لا يُسمح بالرسائل المعاد توجيهها.")
-        return
-    if msg.text != msg.text.strip() or msg.text != msg.text.strip('\n'):
-        await msg.reply_text("❌ لا يوجد لصق، اكتب مشوارك بنفسك.")
-        return
-    if len(msg.text) > 400:
-        await msg.reply_text("⚠️ رسالتك طويلة جدًا، الرجاء تقصيرها.")
-        return
-    if contains_forbidden(msg.text):
-        await update.message.reply_text("🚫 رسالتك تحتوي على محتوى غير مسموح به.")
-        return
-    phone_number = None
-    for word in msg.text.split():
-        if word.isdigit() and len(word) >= 9:
-            phone_number = word
-            break
-    if not phone_number:
-        await update.message.reply_text("❌ يرجى تضمين رقم الجوال في رسالتك.")
-        return
-    pending_users.add(user_id)
-    request_id = str(len(active_requests))
-    request = {
-        "id": request_id,
-        "user_id": user_id,
-        "message": msg.text.replace(phone_number, "******"),
-        "phone_number": phone_number,
-        "accepted_by": None,
-        "message_ids": {}
-    }
-    active_requests.append(request)
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🚗 قبول المشوار", callback_data=f"accept_{request_id}")]
-    ])
-    tasks = [context.bot.send_message(chat_id=did, text=f"🚕 طلب جديد!\n\n{request['message']}", reply_markup=keyboard) for did in DELEGATE_IDS]
-    responses = await asyncio.gather(*tasks, return_exceptions=True)
-    for i, response in enumerate(responses):
-        if isinstance(response, Exception):
-            continue
-        request["message_ids"][DELEGATE_IDS[i]] = response.message_id
-    await update.message.reply_text("✅ تم إرسال طلبك إلى المناديب، يرجى الانتظار...")
-    pending_users.discard(user_id)
-
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-    if not data.startswith("accept_"):
-        return
-    request_id = data.split("_")[1]
-    async with lock:
-        for request in active_requests:
-            if request["id"] == request_id:
-                if request["accepted_by"] is not None:
-                    await query.edit_message_text("❌ تم قبول هذا الطلب من مندوب آخر.")
-                    return
-                request["accepted_by"] = query.from_user.id
-                log_to_excel(request, query.from_user.id)
-                await context.bot.send_message(chat_id=query.from_user.id, text=f"📞 رقم العميل: {request['phone_number']}")
-                await context.bot.send_message(chat_id=request["user_id"], text="✅ تم قبول طلبك من السائق، سيتواصل معك على الواتساب.")
-                for did, msg_id in request["message_ids"].items():
-                    try:
-                        await context.bot.edit_message_reply_markup(chat_id=did, message_id=msg_id, reply_markup=None)
-                    except:
-                        pass
-                return
+    await update.message.reply_text("🎤 أرسل تسجيل صوتي يحتوي على تفاصيل المصاريف ليتم تسجيلها تلقائياً.")
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("log", send_log))
-    app.add_handler(CommandHandler("log_text", send_log_text))
-    app.add_handler(CommandHandler("clients", send_clients))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    print("✅ Bot is running...")
+    app.add_handler(MessageHandler(filters.VOICE, handle_audio))
     app.run_polling()
