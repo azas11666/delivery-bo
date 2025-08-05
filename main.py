@@ -14,9 +14,9 @@ DELEGATE_IDS = [
     979025584, 1191690688, 8170847197,
     6934325493, 7829041114, 5089840611, 5867751923,
     7059987819, 6907220336, 7453553320, 7317135212,
-    6545258494, 7786225278, 7029907146, 7731731836, 1097659084, 8076843839, 7313682176, 7290225311, 982026678, 7825812182, 
+    6545258494, 7786225278, 7029907146, 7731731836, 1097659084, 8076843839, 7313682176, 7290225311, 982026678, 7825812182,
 ]
- 
+
 FORBIDDEN_KEYWORDS = [
     "إجازة", "تقرير", "زواج", "مكيفات", "مكيف", "مرضية", "مراجة", "مشهد",
     "مرافق", "طبي", "متحررة", "سعر", "جميلة", "رقم", "056", "057", "058", "059",
@@ -27,6 +27,7 @@ FORBIDDEN_KEYWORDS = [
 
 active_requests = []
 pending_users = set()
+pending_delegates = {}
 lock = asyncio.Lock()
 
 def log_to_excel(request, driver_id):
@@ -112,21 +113,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     log_client_id(user_id)
     if user_id in DELEGATE_IDS:
-        await context.bot.send_message(
-            chat_id=user_id,
-            text="✅ تم تسجيلك كمندوب بنجاح.\nإذا لم تصلك طلبات أو واجهت مشاكل تواصل معنا على: 0506260139"
-        )
+        await context.bot.send_message(chat_id=user_id, text="✅ تم تسجيلك كمندوب بنجاح.\nإذا لم تصلك طلبات أو واجهت مشاكل تواصل معنا على: 0506260139")
     else:
         await update.message.reply_text(
             "مرحباً فيك ببوت *مشاوير جدة* 👋\n\n"
-            "عزيزي العميل، الرجاء كتابة مشوارك بالتفاصيل التالية:\n"
-            "مثال: مشوار من الحمدانية إلى السامر مدفوع 30\n"
-            "0506260****\n\n"
-            "🟢 *اكتبها في رسالة واحدة فقط.*\n"
-            "بعدها سيتم إرسال طلبك لأكثر من 100 مندوب موثوق.\n"
-            "🚗 سيتواصل معك السائق عبر واتساب خلال 3 دقائق، كن بالانتظار.\n\n"
-            "🔒 *ملاحظة:* رقم جوالك لن يظهر إلا للسائق الذي يقبل المشوار.\n"
-            "❌ *لا توجد مشاوير شهرية*",
+            "إذا كنت مندوب وتريد التسجيل:\n"
+            "📩 أرسل الرسالة التالية:\n\n"
+            "#9981\nالاسم الكامل ورقم الجوال\n\n"
+            "🔒 الإدارة ستراجع طلبك وترد عليك.\n\n"
+            "أما إذا كنت عميل:\n"
+            "اكتب مشوارك مع رقم جوالك في رسالة واحدة.",
             parse_mode="Markdown"
         )
 
@@ -139,27 +135,36 @@ def contains_forbidden(text):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    message = update.message.text
+
+    if message.startswith("#9981"):
+        pending_delegates[user_id] = message
+        await context.bot.send_message(chat_id=ADMIN_ID, text=f"📥 طلب تسجيل مندوب:\n\n{message}\n\nID: `{user_id}`", parse_mode="Markdown")
+        await update.message.reply_text("📨 تم إرسال طلبك للإدارة. سيتم الرد عليك بعد المراجعة.")
+        return
+
     if user_id in DELEGATE_IDS:
         return
+
     log_client_id(user_id)
     if user_id in pending_users:
         await update.message.reply_text("⚠️ طلبك السابق قيد المعالجة، الرجاء الانتظار.")
         return
-    message = update.message
-    if message.forward_date:
-        await message.reply_text("❌ لا يُسمح بالرسائل المعاد توجيهها.")
+    msg = update.message
+    if msg.forward_date:
+        await msg.reply_text("❌ لا يُسمح بالرسائل المعاد توجيهها.")
         return
-    if message.text != message.text.strip() or message.text != message.text.strip('\n'):
-        await message.reply_text("❌ لا يوجد لصق، اكتب مشوارك بنفسك.")
+    if msg.text != msg.text.strip() or msg.text != msg.text.strip('\n'):
+        await msg.reply_text("❌ لا يوجد لصق، اكتب مشوارك بنفسك.")
         return
-    if len(message.text) > 400:
-        await message.reply_text("⚠️ رسالتك طويلة جدًا، الرجاء تقصيرها.")
+    if len(msg.text) > 400:
+        await msg.reply_text("⚠️ رسالتك طويلة جدًا، الرجاء تقصيرها.")
         return
-    if contains_forbidden(message.text):
+    if contains_forbidden(msg.text):
         await update.message.reply_text("🚫 رسالتك تحتوي على محتوى غير مسموح به.")
         return
     phone_number = None
-    for word in message.text.split():
+    for word in msg.text.split():
         if word.isdigit() and len(word) >= 9:
             phone_number = word
             break
@@ -171,7 +176,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     request = {
         "id": request_id,
         "user_id": user_id,
-        "message": message.text.replace(phone_number, "******"),
+        "message": msg.text.replace(phone_number, "******"),
         "phone_number": phone_number,
         "accepted_by": None,
         "message_ids": {}
