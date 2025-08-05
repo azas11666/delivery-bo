@@ -1,68 +1,70 @@
 import os
-import whisper
 import logging
 from datetime import datetime
 from openpyxl import Workbook, load_workbook
 from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, ContextTypes, filters
+from telegram.ext import (
+    ApplicationBuilder,
+    MessageHandler,
+    CommandHandler,
+    ContextTypes,
+    filters
+)
+import whisper
 
 TOKEN = "8407369465:AAFJ8MCRIkWoO2HiETILry7XeuHf81T1DBw"
-EXCEL_FILE = "daily_expenses.xlsx"
-
+EXCEL_FILE = "expenses_log.xlsx"
 model = whisper.load_model("base")
+logging.basicConfig(level=logging.INFO)
 
 if not os.path.exists(EXCEL_FILE):
     wb = Workbook()
     ws = wb.active
-    ws.append(["التاريخ", "الفئة", "العملية", "المبلغ"])
+    ws.append(["التاريخ", "العملية", "الصنف", "المبلغ"])
     wb.save(EXCEL_FILE)
-
-logging.basicConfig(level=logging.INFO)
 
 def extract_expenses(text):
     import re
-    category_keywords = {
-        "سيارة": "سيارة",
-        "بنزين": "سيارة",
-        "ملابس": "ملابس",
-        "أكل": "أكل",
-        "مطعم": "أكل",
-        "بيت": "سكن",
-        "إيجار": "سكن"
-    }
-    transaction_type = "خسارة" if "صرف" in text or "دفعت" in text else "ربح"
-    matches = re.findall(r'(\d+)\s*ريال', text)
-    category = "أخرى"
-    for word in category_keywords:
-        if word in text:
-            category = category_keywords[word]
-            break
-    amount = int(matches[0]) if matches else 0
-    return category, transaction_type, amount
+    pattern = r"(ربح|خسارة)\s+(\d+)\s*ريال(?:.*?على)?\s*([\u0600-\u06FF]+)"
+    matches = re.findall(pattern, text)
+    return [(op, int(amount), category.strip()) for op, amount, category in matches]
 
-def save_to_excel(category, transaction_type, amount):
+def save_to_excel(expenses):
     wb = load_workbook(EXCEL_FILE)
     ws = wb.active
-    date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ws.append([date_str, category, transaction_type, amount])
+    for op, amount, category in expenses:
+        ws.append([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), op, category, amount])
     wb.save(EXCEL_FILE)
 
-async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    file = await update.message.voice.get_file()
-    file_path = "voice.ogg"
-    await file.download_to_drive(file_path)
-    result = model.transcribe(file_path, language="ar")
-    text = result["text"]
-    category, transaction_type, amount = extract_expenses(text)
-    save_to_excel(category, transaction_type, amount)
-    await update.message.reply_text(f"✅ تم تسجيل العملية:\nالفئة: {category}\nالعملية: {transaction_type}\nالمبلغ: {amount} ريال")
-    os.remove(file_path)
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🎤 أرسل تسجيل صوتي يحتوي على تفاصيل المصاريف ليتم تسجيلها تلقائياً.")
+    await update.message.reply_text("🎙️ أرسل تسجيل صوتي يحتوي على تفاصيل المصاريف مثل: خسارة 40 ريال على البنزين")
+
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    file = await context.bot.get_file(update.message.voice.file_id)
+    path = "voice.ogg"
+    await file.download_to_drive(path)
+    import subprocess
+    wav_path = "voice.wav"
+    subprocess.run(["ffmpeg", "-i", path, wav_path, "-y"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    result = model.transcribe(wav_path, language="ar")
+    text = result["text"]
+    expenses = extract_expenses(text)
+    if expenses:
+        save_to_excel(expenses)
+        await update.message.reply_text("✅ تم تسجيل المصاريف بنجاح")
+    else:
+        await update.message.reply_text("❌ لم يتم التعرف على مصاريف في التسجيل")
+
+async def export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if os.path.exists(EXCEL_FILE):
+        await update.message.reply_document(document=open(EXCEL_FILE, "rb"))
+    else:
+        await update.message.reply_text("❌ لا يوجد سجل حتى الآن.")
 
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.VOICE, handle_audio))
+    app.add_handler(CommandHandler("export", export_excel))
+    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    print("✅ Bot is running...")
     app.run_polling()
