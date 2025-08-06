@@ -1,99 +1,103 @@
 import os
-import re
 import logging
+import openai
 import whisper
-from datetime import datetime
 from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    MessageHandler,
-    CommandHandler,
-    ContextTypes,
-    filters
-)
+from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, ContextTypes, filters
 from openpyxl import Workbook, load_workbook
+from datetime import datetime
 
-TOKEN = "ضع_توكن_البوت_هنا"
-EXCEL_FILE = "expenses.xlsx"
-model = whisper.load_model("base")
+TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+openai.api_key = "YOUR_OPENAI_API_KEY"
 
 logging.basicConfig(level=logging.INFO)
+AUDIO_DIR = "audios"
+EXCEL_FILE = "expenses.xlsx"
+
+os.makedirs(AUDIO_DIR, exist_ok=True)
+model = whisper.load_model("base")
 
 if not os.path.exists(EXCEL_FILE):
     wb = Workbook()
     ws = wb.active
-    ws.append(["التاريخ", "النص", "المبلغ", "التصنيف", "العملية"])
+    ws.append(["التاريخ", "الوصف", "الفئة", "النوع", "المبلغ"])
     wb.save(EXCEL_FILE)
 
-KEYWORDS_CATEGORIES = {
-    "بنزين": "سيارة", "سيارة": "سيارة", "مواقف": "سيارة",
-    "كهرب": "كهرباء", "ماء": "ماء", "فاتورة": "كهرباء",
-    "قهوة": "مشروبات", "مطعم": "أكل", "غداء": "أكل", "عشاء": "أكل",
-    "بقالة": "مواد غذائية", "ملابس": "ملابس",
-    "راتب": "دخل", "دخل": "دخل", "ربح": "دخل"
-}
+def analyze_text_with_ai(text):
+    prompt = f"""
+حلل الرسالة التالية واكتب النتيجة بصيغة: 
+"الفئة: (مثلاً بنزين، ملابس، طعام...)
+النوع: (ربح أو مصروف)
+المبلغ: (رقماً بدون كتابة كلمة ريال مثلاً 40)
+الوصف: (وصف مختصر)
 
-def extract_info(text):
-    amount_match = re.search(r"(\d+)\s*ريال", text)
-    amount = int(amount_match.group(1)) if amount_match else None
-    category = "غير محدد"
-    operation = "خسارة"
+النص: {text}
+    """
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            temperature=0,
+            messages=[
+                {"role": "system", "content": "أنت مساعد مالي يفهم النصوص ويستخرج منها معلومات مالية بشكل منظم."},
+                {"role": "user", "content": prompt},
+            ]
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        logging.error(f"OpenAI error: {e}")
+        return None
 
-    for keyword, cat in KEYWORDS_CATEGORIES.items():
-        if keyword in text:
-            category = cat
-            if cat == "دخل":
-                operation = "ربح"
-            break
-
-    return amount, category, operation
-
-def save_to_excel(text, amount, category, operation):
+def save_to_excel(category, entry_type, amount, description):
     wb = load_workbook(EXCEL_FILE)
     ws = wb.active
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ws.append([now, text, amount, category, operation])
+    ws.append([now, description, category, entry_type, amount])
     wb.save(EXCEL_FILE)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🎙️ أرسل رسالة صوتية أو نصية تحتوي على المبلغ والتفاصيل.\nمثال: 'دفعت 30 ريال بنزين' أو سجل صوت.")
+async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    file = await update.message.voice.get_file()
+    file_path = os.path.join(AUDIO_DIR, f"{update.message.message_id}.ogg")
+    await file.download_to_drive(file_path)
 
-async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not os.path.exists(EXCEL_FILE):
-        await update.message.reply_text("❌ لا يوجد سجلات.")
-        return
-    wb = load_workbook(EXCEL_FILE)
-    ws = wb.active
-    rows = list(ws.iter_rows(values_only=True))[1:]
-    if not rows:
-        await update.message.reply_text("❌ لا يوجد سجلات.")
-        return
-    result = "📒 *سجل المصروفات:*\n"
-    for row in rows[-10:]:
-        result += f"🕒 {row[0]} | {row[2]} ريال | {row[3]} | {row[4]}\n"
-    await update.message.reply_text(result, parse_mode="Markdown")
+    wav_path = file_path.replace(".ogg", ".wav")
+    os.system(f"ffmpeg -i {file_path} -ar 16000 -ac 1 {wav_path} -y")
 
-async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    voice = update.message.voice
-    file = await context.bot.get_file(voice.file_id)
-    ogg_path = "voice.ogg"
-    wav_path = "voice.wav"
-    await file.download_to_drive(ogg_path)
-    os.system(f"ffmpeg -i {ogg_path} -ar 16000 -ac 1 -c:a pcm_s16le {wav_path} -y")
-    result = model.transcribe(wav_path)
-    text = result["text"].strip()
-    amount, category, operation = extract_info(text)
-    if amount:
-        save_to_excel(text, amount, category, operation)
-        await update.message.reply_text(f"✅ تم تسجيل: {amount} ريال - {category} - {operation}")
+    try:
+        result = model.transcribe(wav_path)
+        text = result["text"]
+        logging.info(f"Transcribed: {text}")
+    except Exception as e:
+        logging.error(f"Transcription error: {e}")
+        await update.message.reply_text("❌ حدث خطأ أثناء تحويل الرسالة الصوتية إلى نص.")
+        return
+
+    ai_result = analyze_text_with_ai(text)
+    if ai_result is None:
+        await update.message.reply_text("❌ لم يتم فهم الرسالة الصوتية.")
+        return
+
+    try:
+        lines = ai_result.split("\n")
+        category = lines[0].split(":")[1].strip()
+        entry_type = lines[1].split(":")[1].strip()
+        amount = float(lines[2].split(":")[1].strip())
+        description = lines[3].split(":")[1].strip()
+
+        save_to_excel(category, entry_type, amount, description)
+        await update.message.reply_text(f"✅ تم تسجيل العملية:\nالفئة: {category}\nالنوع: {entry_type}\nالمبلغ: {amount} ريال\nالوصف: {description}")
+    except Exception as e:
+        logging.error(f"Parse error: {e}")
+        await update.message.reply_text("❌ لم يتم فهم الرسالة الصوتية. يرجى قول مثال مثل: '30 ريال بنزين'.")
+
+async def export_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if os.path.exists(EXCEL_FILE):
+        await update.message.reply_document(document=open(EXCEL_FILE, "rb"))
     else:
-        await update.message.reply_text("❌ لم يتم التعرف على المبلغ. أعد المحاولة بوضوح.")
-    os.remove(ogg_path)
-    os.remove(wav_path)
+        await update.message.reply_text("⚠️ لا يوجد سجل بعد.")
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    amount, category, operation = extract_info(text)
-    if amount:
-        save_to_excel(text, amount, category, operation)
-        await update.message.reply_text(f"✅ تم تسجيل_
+app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(MessageHandler(filters.VOICE, voice_handler))
+app.add_handler(CommandHandler("export", export_log))
+
+print("✅ Bot started.")
+app.run_polling()
