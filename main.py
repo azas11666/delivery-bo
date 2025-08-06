@@ -1,16 +1,10 @@
 import os
 import logging
-import whisper
 from datetime import datetime
 from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    MessageHandler,
-    CommandHandler,
-    ContextTypes,
-    filters
-)
+from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, ContextTypes, filters
 from openpyxl import Workbook, load_workbook
+import whisper
 
 TOKEN = "8407369465:AAFJ8MCRIkWoO2HiETILry7XeuHf81T1DBw"
 EXCEL_FILE = "expenses.xlsx"
@@ -86,5 +80,4 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("export", export))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
-    print("✅ Bot is running...")
     app.run_polling()
