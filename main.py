@@ -12,27 +12,22 @@ from telegram.ext import (
 )
 from openpyxl import Workbook, load_workbook
 
-# إعدادات
 TOKEN = "8407369465:AAFJ8MCRIkWoO2HiETILry7XeuHf81T1DBw"
 EXCEL_FILE = "expenses.xlsx"
 
-# إعداد سجل الأخطاء
 logging.basicConfig(level=logging.INFO)
 
-# نموذج Whisper
 model = whisper.load_model("base")
 
-# إنشاء ملف Excel إذا لم يكن موجود
 if not os.path.exists(EXCEL_FILE):
     wb = Workbook()
     ws = wb.active
     ws.append(["التاريخ", "التصنيف", "المبلغ", "العملية"])
     wb.save(EXCEL_FILE)
 
-# استخراج المصاريف من النص
 def extract_expense(text):
     import re
-    text = text.replace("ريـال", "ريال")  # إصلاح الكتابة
+    text = text.replace("ريـال", "ريال")
     pattern = r'(\d+)\s*ريال(?:.*?)(بنزين|ملابس|مطعم|سيارة|بقالة|قهوة|كهرباء|ماء|ايجار|راتب|دخل|ربح|خسارة)?'
     match = re.search(pattern, text)
     if match:
@@ -42,7 +37,6 @@ def extract_expense(text):
         return amount, category, operation
     return None
 
-# حفظ السجل
 def save_to_excel(amount, category, operation):
     wb = load_workbook(EXCEL_FILE)
     ws = wb.active
@@ -50,11 +44,9 @@ def save_to_excel(amount, category, operation):
     ws.append([now, category, amount, operation])
     wb.save(EXCEL_FILE)
 
-# أمر /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🎙️ أرسل رسالة صوتية تحتوي على المبلغ والتصنيف.\nمثال: '30 ريال بنزين'\nثم أرسل /export لعرض السجل.")
 
-# أمر /export
 async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not os.path.exists(EXCEL_FILE):
         await update.message.reply_text("❌ لا يوجد سجلات حالياً.")
@@ -70,14 +62,13 @@ async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result += f"🕒 {row[0]} | {row[1]} | {row[2]} ريال | {row[3]}\n"
     await update.message.reply_text(result, parse_mode="Markdown")
 
-# التعامل مع الصوت
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     voice = update.message.voice
     file = await context.bot.get_file(voice.file_id)
     ogg_path = "voice.ogg"
     wav_path = "voice.wav"
     await file.download_to_drive(ogg_path)
-    os.system(f"ffmpeg -i {ogg_path} -ar 16000 -ac 1 -c:a pcm_s16le {wav_path} -y")
+    os.system("ffmpeg -y -i voice.ogg -ar 16000 -ac 1 voice.wav")
     result = model.transcribe(wav_path)
     text = result["text"]
     expense = extract_expense(text)
@@ -90,7 +81,6 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     os.remove(ogg_path)
     os.remove(wav_path)
 
-# تشغيل البوت
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
