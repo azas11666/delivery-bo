@@ -1,5 +1,5 @@
 python-telegram-bot==20.3
 openai
-whisper
+git+https://github.com/openai/whisper.git
 ffmpeg-python
 openpyxl
