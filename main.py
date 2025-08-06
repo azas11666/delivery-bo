@@ -88,7 +88,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("حدث خطأ أثناء معالجة الصوت.")
         logging.error(e)
 
-/start
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🎙️ أرسل تسجيل صوتي يحتوي على تفاصيل المصروف، وسأقوم بتحليله وتسجيله في ملف الإكسل.")
 
