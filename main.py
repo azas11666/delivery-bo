@@ -16,14 +16,14 @@ from openpyxl import Workbook, load_workbook
 from tempfile import NamedTemporaryFile
 from pydub import AudioSegment
 
-# إعداد التوكن الصحيح
+
 TOKEN = "8407369465:AAFJ8MCRIkWoO2HiETILry7XeuHf81T1DBw"
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# إعداد النموذج
+
 model = whisper.load_model("base")
 
-# ملف الإكسل
+
 EXCEL_FILE = "expenses.xlsx"
 if not os.path.exists(EXCEL_FILE):
     wb = Workbook()
@@ -31,10 +31,10 @@ if not os.path.exists(EXCEL_FILE):
     ws.append(["التاريخ", "الوصف", "المبلغ", "التصنيف", "النوع"])
     wb.save(EXCEL_FILE)
 
-# تسجيل الدخول
+
 logging.basicConfig(level=logging.INFO)
 
-# تصنيف الكلام العام
+
 def analyze_text(text):
     import re
 
@@ -57,14 +57,14 @@ def analyze_text(text):
 
     return amount, category, type_
 
-# حفظ في الاكسل
+
 def save_to_excel(date, desc, amount, category, type_):
     wb = load_workbook(EXCEL_FILE)
     ws = wb.active
     ws.append([date, desc, amount, category, type_])
     wb.save(EXCEL_FILE)
 
-# عند استلام رسالة صوتية
+
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         file = await context.bot.get_file(update.message.voice.file_id)
@@ -88,15 +88,15 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("حدث خطأ أثناء معالجة الصوت.")
         logging.error(e)
 
-# عند استلام /start
+/start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🎙️ أرسل تسجيل صوتي يحتوي على تفاصيل المصروف، وسأقوم بتحليله وتسجيله في ملف الإكسل.")
 
-# عرض السجل
+
 async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_document(InputFile(EXCEL_FILE))
 
-# تشغيل البوت
+
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
 
