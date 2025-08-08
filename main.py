@@ -1,156 +1,79 @@
 import os
 import logging
-import datetime
-import asyncio
-import whisper
-from tempfile import NamedTemporaryFile
-
-from telegram import Update, InputFile
-from telegram.ext import (
-    ApplicationBuilder,
-    MessageHandler,
-    CommandHandler,
-    ContextTypes,
-    filters,
-)
-
+from datetime import datetime
 from openpyxl import Workbook, load_workbook
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+import whisper
 from pydub import AudioSegment
 
-# ================== CONFIG ==================
-TOKEN = "8407369465:AAFJ8MCRIkWoO2HiETILry7XeuHf81T1DBw"
-EXCEL_FILE = "expenses.xlsx"
-# ============================================
+TOKEN = "YOUR_TOKEN"
+ADMIN_ID = 7799549664
+DELEGATE_IDS = [979025584, 6274276105]
+EXCEL_FILE = "requests.xlsx"
 
-logging.basicConfig(level=logging.INFO)
-
-# Whisper CPU-only (خفيف وثابت على الاستضافة)
-model = whisper.load_model("small")  # غيّر إلى "tiny" لو تبي أخف
-WHISPER_ARGS = {"language": "ar", "fp16": False}
-
-# إنشاء ملف الإكسل لو ما وُجد
 if not os.path.exists(EXCEL_FILE):
     wb = Workbook()
     ws = wb.active
-    ws.title = "Expenses"
-    ws.append(["التاريخ", "الوصف", "المبلغ", "التصنيف", "النوع"])
+    ws.append(["التاريخ", "العميل", "المشوار", "السعر", "رقم الجوال", "المندوب"])
     wb.save(EXCEL_FILE)
 
-
-def parse_text(text: str):
-    """يستخرج المبلغ + التصنيف + النوع من نص عام."""
-    import re
-
-    amount = ""
-    m = re.search(r"(\d{1,6})\s*ريال", text)
-    if m:
-        amount = m.group(1)
-
-    # تصنيف تقريبي
-    t = text
-    if any(k in t for k in ["بنزين", "وقود", "محطة", "سيارة"]):
-        category = "السيارة"
-    elif any(k in t for k in ["ملابس", "تيشيرت", "بنطلون", "عباية"]):
-        category = "الملابس"
-    elif any(k in t for k in ["مطعم", "عشاء", "غداء", "برغر", "بيتزا", "قهوة", "ستاربكس"]):
-        category = "مطاعم/قهوة"
-    elif any(k in t for k in ["دخل", "حوّلت", "حوّل", "ربح", "مكسب"]):
-        category = "دخل"
-    else:
-        category = "غير مصنف"
-
-    tx_type = "ربح" if category == "دخل" or any(k in t for k in ["دخل", "ربح"]) else "خسارة"
-    return amount, category, tx_type
-
-
-def save_row(desc: str, amount: str, category: str, tx_type: str):
-    wb = load_workbook(EXCEL_FILE)
-    ws = wb.active
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    ws.append([now, desc, amount, category, tx_type])
-    wb.save(EXCEL_FILE)
-
+logging.basicConfig(level=logging.INFO)
+model = whisper.load_model("base")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🎙️ أرسل رسالة صوتية بتفاصيل المصروف بصيغة عامة، مثل:\n"
-        "«دفعت 40 ريال بنزين»، أو «قهوة بـ 15 ريال»، وسأفهمها وأسجّلها.\n\n"
-        "📄 للأرشيف أرسل: /report"
+        "مرحباً فيك ببوت *مشاوير جدة* 👋\n\n"
+        "عزيزي العميل، الرجاء كتابة مشوارك بالتفاصيل التالية:\n"
+        "1️⃣ *اذكر مشوارك: من فين إلى وين*\n"
+        "2️⃣ *اذكر السعر المدفوع*\n"
+        "3️⃣ *اذكر رقم جوالك*\n\n"
+        "🟢 *اكتبها في رسالة واحدة فقط.*\n"
+        "بعدها سيتم إرسال طلبك لأكثر من 100 مندوب موثوق.\n"
+        "🚗 سيتواصل معك السائق عبر واتساب خلال 3 دقائق، كن بالانتظار.\n\n"
+        "🔒 *ملاحظة:* رقم جوالك لن يظهر إلا للسائق الذي يقبل المشوار، لذلك ضروري تكتبه.",
+        parse_mode="Markdown"
     )
 
+async def handle_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_text = update.message.text.strip()
+    phone = "".join(filter(str.isdigit, user_text))
+    masked_phone = phone[:-5] + "*****" if len(phone) >= 5 else phone
 
-async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not os.path.exists(EXCEL_FILE):
-        await update.message.reply_text("لا يوجد سجل حتى الآن.")
-        return
-    await update.message.reply_document(InputFile(EXCEL_FILE))
+    wb = load_workbook(EXCEL_FILE)
+    ws = wb.active
+    ws.append([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), update.effective_user.first_name, user_text, "", phone, ""])
+    wb.save(EXCEL_FILE)
 
+    keyboard = [
+        [InlineKeyboardButton("قبول", callback_data=f"accept_{update.message.message_id}")]
+    ]
 
-async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        voice = update.message.voice
-        if not voice:
-            return
-
-        tg_file = await context.bot.get_file(voice.file_id)
-
-        # حمّل الملف إلى مسار مؤقت .ogg (Telegram = OGG/Opus)
-        with NamedTemporaryFile(delete=False, suffix=".ogg") as ogg_f:
-            await tg_file.download_to_drive(ogg_f.name)
-            ogg_path = ogg_f.name
-
-        # حوّله إلى wav عبر ffmpeg (pydub)
-        with NamedTemporaryFile(delete=False, suffix=".wav") as wav_f:
-            wav_path = wav_f.name
-        AudioSegment.from_file(ogg_path, format="ogg").export(wav_path, format="wav")
-
-        # تفريغ النص
-        result = model.transcribe(wav_path, **WHISPER_ARGS)
-        text = (result.get("text") or "").strip()
-
-        # نظّف المؤقتات
+    for delegate_id in DELEGATE_IDS:
         try:
-            os.remove(ogg_path)
-        except Exception:
-            pass
-        try:
-            os.remove(wav_path)
-        except Exception:
-            pass
-
-        if not text:
-            await update.message.reply_text("❌ لم أفهم التسجيل. حاول أن تذكر مبلغًا وكلمة مثل «ريال».")
-            return
-
-        amount, category, tx_type = parse_text(text)
-        if not amount:
-            await update.message.reply_text(
-                f"🗒️ نص مُستخرج:\n{text}\n\n"
-                "❌ لم أجد مبلغًا بصيغة «XX ريال». أعد المحاولة واذكر المبلغ."
+            await context.bot.send_message(
+                chat_id=delegate_id,
+                text=f"📍 مشوار جديد:\n{user_text}\n📞 {masked_phone}",
+                reply_markup=InlineKeyboardMarkup(keyboard)
             )
-            return
+        except:
+            pass
 
-        save_row(text, amount, category, tx_type)
-        await update.message.reply_text(
-            f"✅ تم التسجيل:\n"
-            f"• الوصف: {text}\n"
-            f"• المبلغ: {amount} ريال\n"
-            f"• التصنيف: {category}\n"
-            f"• النوع: {tx_type}"
-        )
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if query.data.startswith("accept_"):
+        msg_id = int(query.data.split("_")[1])
+        for delegate_id in DELEGATE_IDS:
+            if delegate_id != query.from_user.id:
+                try:
+                    await context.bot.delete_message(chat_id=delegate_id, message_id=msg_id)
+                except:
+                    pass
+        await query.edit_message_text(text=f"✅ تم قبول المشوار\n📞 رقم العميل: {query.message.text.split('📞 ')[1].replace('*****', '')}")
 
-    except Exception as e:
-        logging.exception("voice error")
-        await update.message.reply_text("❌ حدث خطأ أثناء معالجة الصوت. جرّب مرة أخرى.")
-
-
-def main():
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("report", report))
-    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
-    app.run_polling(close_loop=False)
-
-
-if __name__ == "__main__":
-    main()
+app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_request))
+app.add_handler(CallbackQueryHandler(button))
+app.run_polling()
