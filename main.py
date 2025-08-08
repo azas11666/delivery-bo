@@ -7,7 +7,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Cal
 from faster_whisper import WhisperModel
 
 
-TOKEN = "8407369465:AAFJ8MCRIkWo02HiETILry7XeuHf81T1DBw"
+TOKEN = "8407369465:AAFJ8MCRIkWoO2HiETILry7XeuHf81T1DBw"
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
