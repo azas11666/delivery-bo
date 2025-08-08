@@ -2,7 +2,8 @@ import os
 import re
 import sys
 import logging
-import ffmpeg
+import subprocess
+import imageio_ffmpeg
 from datetime import datetime, timedelta
 from collections import defaultdict
 from faster_whisper import WhisperModel
@@ -102,7 +103,12 @@ logging.info(f"Loading faster-whisper model: {WHISPER_MODEL_NAME}")
 whisper_model = WhisperModel(WHISPER_MODEL_NAME, device="cpu", compute_type="int8")
 
 def convert_ogg_to_wav(src_path, dst_path):
-    ffmpeg.input(src_path).output(dst_path, ar=16000, ac=1).overwrite_output().run(quiet=True)
+    exe = imageio_ffmpeg.get_ffmpeg_exe()
+    subprocess.run(
+        [exe, "-y", "-i", src_path, "-ar", "16000", "-ac", "1", dst_path],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+
 
 def transcribe_audio(path):
     segments, info = whisper_model.transcribe(path, language="ar")
