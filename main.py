@@ -1,162 +1,145 @@
-import os
-import logging
-import datetime
-import tempfile
-import subprocess
-
-import whisper
+import os, re, logging
+from datetime import datetime, timedelta
 from openpyxl import Workbook, load_workbook
-from telegram import Update, InputFile
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
-)
-
-TOKEN = "8407369465:AAFJ8MCRIkWoO2HiETILry7XeuHf81T1DBw"
-EXCEL_FILE = "expenses.xlsx"
-WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "tiny")  # tiny/small
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
 logging.basicConfig(level=logging.INFO)
 
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
-os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+EXCEL_FILE = "expenses.xlsx"
 
-model = whisper.load_model(WHISPER_MODEL_NAME)
-WHISPER_ARGS = {"language": "ar", "fp16": False}
+ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
-if not os.path.exists(EXCEL_FILE):
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Expenses"
-    ws.append(["التاريخ", "الوصف", "المبلغ", "التصنيف", "النوع"])
-    wb.save(EXCEL_FILE)
+CATEGORIES = {
+    "الأكل": [
+        "اكل","طعام","غدا","عشا","عشاء","فطور","سحور","طبخ","مطعم","وجبه","سندوتش","برجر","برقر",
+        "شاورما","كبسه","رز","سمبوسه","بيتزا","معصوب","بقاله","بقالة","سوبرماركت","تميس","فواكه","خضار"
+    ],
+    "المشروبات": [
+        "قهوه","قهوة","شاي","عصير","مويه","ماء","بيبسي","كولا","مشروب","موكا","كابتشينو","لاتيه","نسكافيه","حليب"
+    ],
+    "المواصلات": [
+        "بنزين","وقود","تاكسي","تكسي","اوبر","أوبر","كريم","مواصلات","باركينج","مواقف","موقف","باص","قطار","تذاكر","ديزل"
+    ],
+    "التسوق": [
+        "ملابس","قميص","تيشيرت","بنطال","بنطلون","حذاء","جزمه","عطر","عطور","شنطه","حقيبه","اكسسوار","ساعه"
+    ],
+    "الفواتير": [
+        "فاتوره","فاتورة","فواتير","كهرب","كهرباء","مويه","ماء","انترنت","انترنِت","نت","جوال","هاتف",
+        "دي اس ال","الياف","رسوم","ضريبه","ضريبة","بلديه","بلدية"
+    ],
+    "السكن": [
+        "ايجار","إيجار","أجار","rent","سكن","شقه","شقة","بيت","فندق","غرفه","غرفة","قسط","دفعة"
+    ],
+    "الصحة": [
+        "مستشفى","مستوصف","صيدليه","صيدلية","دواء","علاج","تحاليل","تحليل","اسنان","أسنان","طبيب","نظارات"
+    ],
+    "الترفيه": [
+        "سينما","فيلم","العاب","ألعاب","بلايستيشن","ps","ملاهي","رحله","رحلة","طلعه","طلعة","كشتة","كشته","مقهى","كوفي"
+    ],
+    "الاشتراكات": [
+        "اشتراك","عضويه","عضوية","نتفلكس","شاهد","شاهد vip","يوتيوب بريميوم","spotify","سبوتفاي","apple music","بلايستيشن بلس"
+    ],
+    "الهدايا": [
+        "هديه","هدية","عيديه","عيدية","هدايا","تبرع","صدقه","صدقة"
+    ],
+    "الصيانة": [
+        "صيانه","صيانة","اصلاح","إصلاح","قطع غيار","زيت","غيار زيت","كفر","كفرات","ميكانيكي","سباك","كهربائي"
+    ],
+    "التعليم": [
+        "مدرسه","مدرسة","جامعه","جامعة","دوره","دورة","كورس","كتاب","كتب","رسوم دراسيه","رسوم دراسية"
+    ],
+}
 
-def parse_text(text: str):
-    import re
-    amount = ""
-    m = re.search(r"(\d{1,6})\s*ريال", text)
-    if m:
-        amount = m.group(1)
+PRIORITY = list(CATEGORIES.keys())  # ترتيب أولوية التصنيف عند التعادل
 
-    t = text
-    if any(k in t for k in ["بنزين", "وقود", "محطة", "سيارة"]):
-        category = "السيارة"
-    elif any(k in t for k in ["ملابس", "تيشيرت", "بنطلون", "عباية"]):
-        category = "الملابس"
-    elif any(k in t for k in ["مطعم", "عشاء", "غداء", "فطور", "قهوة", "مشروب", "بيتزا", "برغر"]):
-        category = "مطاعم/قهوة"
-    elif any(k in t for k in ["دخل", "حوّلت", "حوّل", "ربح", "مكسب", "وصلني"]):
-        category = "دخل"
-    else:
-        category = "غير مصنف"
+def ensure_workbook():
+    if not os.path.exists(EXCEL_FILE):
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Expenses"
+        ws.append(["التاريخ", "الوقت", "القسم", "المبلغ", "النص"])
+        wb.save(EXCEL_FILE)
 
-    tx_type = "ربح" if category == "دخل" or any(k in t for k in ["دخل", "ربح", "مكسب"]) else "خسارة"
-    return amount, category, tx_type
+def now_ksa():
+    return datetime.utcnow() + timedelta(hours=3)
 
+def normalize_ar(s: str) -> str:
+    s = s.strip().lower()
+    s = s.translate(ARABIC_DIGITS)
+    s = s.replace("أ","ا").replace("إ","ا").replace("آ","ا").replace("ة","ه").replace("ى","ي").replace("ؤ","و").replace("ئ","ي").replace("ٔ","")
+    s = s.replace("ـ","")
+    return s
 
-def save_row(desc: str, amount: str, category: str, tx_type: str):
+def tokenize_ar(s: str):
+    s = normalize_ar(s)
+    return [w for w in re.split(r"[^a-z\u0600-\u06FF0-9]+", s) if w]
+
+def classify_category(text: str) -> str:
+    tokens = tokenize_ar(text)
+    text_norm = " ".join(tokens)
+    scores = {cat: 0 for cat in CATEGORIES}
+    for cat, kws in CATEGORIES.items():
+        for kw in kws:
+            k = normalize_ar(kw)
+            # عدّ ظهور الكلمة كـ substring أو token
+            if k in text_norm:
+                scores[cat] += 1
+            else:
+                for t in tokens:
+                    if k in t or t in k:
+                        scores[cat] += 1
+                        break
+    best = "غير محدد"
+    best_score = 0
+    for cat in PRIORITY:
+        if scores[cat] > best_score:
+            best_score = scores[cat]
+            best = cat
+    return best if best_score > 0 else "غير محدد"
+
+def extract_amount(text: str):
+    t = normalize_ar(text)
+    m = re.search(r"-?\d+(?:[.,]\d+)?", t)
+    if not m:
+        return None
+    amt = m.group(0).replace(",", ".")
+    try:
+        return float(amt)
+    except:
+        return None
+
+def save_row(date_str: str, time_str: str, category: str, amount: float, raw: str):
     wb = load_workbook(EXCEL_FILE)
     ws = wb.active
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    ws.append([now, desc, amount, category, tx_type])
+    ws.append([date_str, time_str, category, amount, raw])
     wb.save(EXCEL_FILE)
 
-
-def ffmpeg_to_wav(src_path: str, dst_wav: str):
-    # 16k mono wav
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", src_path, "-ar", "16000", "-ac", "1", "-vn", dst_wav],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True
-    )
-
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🎙️ أرسل **مقطع صوتي أو ڤويس** بكلام عام مثل:\n"
-        "• دفعت 40 ريال بنزين\n"
-        "• قهوة 12 ريال\n"
-        "• جاني دخل 100 ريال\n"
-        "وسأسجّله في الإكسل.\n\n"
-        "📄 للأرشيف: /report",
-        parse_mode="Markdown"
-    )
+    await update.message.reply_text("اكتب مثل: صرف 50 غدا / 20 قهوه / 35 بنزين")
 
-
-async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not os.path.exists(EXCEL_FILE):
-        await update.message.reply_text("لا يوجد سجل حتى الآن.")
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text or ""
+    amount = extract_amount(text)
+    if amount is None:
+        await update.message.reply_text("لم أجد مبلغًا. مثال: 50 اكل")
         return
-    await update.message.reply_document(InputFile(EXCEL_FILE))
+    category = classify_category(text)
+    now = now_ksa()
+    date_str = now.strftime("%Y-%m-%d")
+    time_str = now.strftime("%H:%M")
+    save_row(date_str, time_str, category, amount, text)
+    await update.message.reply_text(f"تم ✅\nالقسم: {category}\nالمبلغ: {amount:g}\nالتاريخ: {date_str} {time_str}")
 
-
-async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        file_id = None
-        if update.message.voice:
-            file_id = update.message.voice.file_id
-        elif update.message.audio:
-            file_id = update.message.audio.file_id
-        elif update.message.document and str(update.message.document.mime_type).startswith("audio/"):
-            file_id = update.message.document.file_id
-
-        if not file_id:
-            return
-
-        tg_file = await context.bot.get_file(file_id)
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".bin") as src:
-            await tg_file.download_to_drive(src.name)
-            src_path = src.name
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as dst:
-            wav_path = dst.name
-
-        ffmpeg_to_wav(src_path, wav_path)
-
-        result = model.transcribe(wav_path, **WHISPER_ARGS)
-        text = (result.get("text") or "").strip()
-
-        for p in (src_path, wav_path):
-            try:
-                os.remove(p)
-            except Exception:
-                pass
-
-        if not text:
-            await update.message.reply_text("❌ لم أفهم التسجيل. اذكر المبلغ بصيغة «XX ريال».")
-            return
-
-        amount, category, tx_type = parse_text(text)
-        if not amount:
-            await update.message.reply_text(
-                f"🗒️ النص المستخرج:\n{text}\n\n"
-                "❌ لم أجد مبلغًا بصيغة «XX ريال». أعد المحاولة واذكر المبلغ."
-            )
-            return
-
-        save_row(text, amount, category, tx_type)
-        await update.message.reply_text(
-            f"✅ تم التسجيل:\n"
-            f"• الوصف: {text}\n"
-            f"• المبلغ: {amount} ريال\n"
-            f"• التصنيف: {category}\n"
-            f"• النوع: {tx_type}"
-        )
-
-    except FileNotFoundError:
-        await update.message.reply_text("❌ ffmpeg غير متوفر. أعِد النشر وتأكد من وجوده في render.yaml.")
-        logging.exception("ffmpeg missing")
-    except Exception:
-        await update.message.reply_text("❌ حدث خطأ أثناء معالجة الصوت.")
-        logging.exception("media handler error")
-
-
-def run():
-    app = ApplicationBuilder().token(TOKEN).build()
+def main():
+    ensure_workbook()
+    token = os.getenv("BOT_TOKEN")
+    if not token:
+        raise RuntimeError("الرجاء ضبط متغير البيئة BOT_TOKEN.")
+    app = ApplicationBuilder().token(token).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("report", report))
-    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO | filters.Document.AUDIO, handle_media))
-    app.run_polling(close_loop=False)
-
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.run_polling()
 
 if __name__ == "__main__":
-    run()
+    main()
